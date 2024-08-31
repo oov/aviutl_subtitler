@@ -1,0 +1,332 @@
+# Japanese translations for subtitler vX.X.X ( unknown ) package.
+# Copyright (C) 2024 subtitler Developers
+# This file is distributed under the same license as the subtitler package.
+# Automatically generated, 2024.
+#
+msgid ""
+msgstr ""
+"Report-Msgid-Bugs-To: \n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#, c-format
+msgid "\"%1$hs\" array must contain objects."
+msgstr "\"%1$hs\" 配列にはオブジェクトが格納されていなければなりません。"
+
+#, c-format
+msgid "\"%1$hs\" function returned false."
+msgstr "関数 \"%1$hs\" が false を返しました。"
+
+#, c-format
+msgid "\"%1$hs\" is not a function."
+msgstr "\"%1$hs\" は関数ではありません。"
+
+#, c-format
+msgid "\"%1$hs\" is not a string."
+msgstr "\"%1$hs\" は文字列ではありません。"
+
+#, c-format
+msgid "\"%1$hs\" is not found in same directory."
+msgstr "\"%1$hs\" が同じディレクトリー内に見つかりません。"
+
+#, c-format
+msgid "\"%1$hs\" is not found."
+msgstr "\"%1$hs\" が見つかりません。"
+
+#, c-format
+msgid "\"%1$hs\" must return a string."
+msgstr "\"%1$hs\" は文字列を返さなければいけません。"
+
+msgid "\"segment\" object"
+msgstr "\"segment\" オブジェクト"
+
+msgid "\"word\" object"
+msgstr "\"word\" オブジェクト"
+
+#, c-format
+msgid "%1$hs must contain a \"%2$hs\" (type: %3$hs)."
+msgstr "%1$hs は \"%2$hs\" (タイプ: %3$hs) を含まなければいけません。"
+
+msgid "Abort"
+msgstr "中止"
+
+msgid "Aborted."
+msgstr "中断されました。"
+
+#, c-format
+msgid "Additional Arguments for %1$hs:"
+msgstr "%1$hs への追加のパラメーター:"
+
+msgid "Advanced"
+msgstr "高度"
+
+msgid "Advanced Editing"
+msgstr "拡張編集"
+
+msgid "An error occurred in Lua script."
+msgstr "Luaスクリプトでエラーが発生しました。"
+
+msgid "AviUtl"
+msgstr "AviUtl"
+
+msgid "Converting JSON to EXO..."
+msgstr "JSON を EXO に変換中..."
+
+msgid "Encoding audio to Opus..."
+msgstr "音声を Opus にエンコード中..."
+
+msgid "Failed."
+msgstr "処理に失敗しました。"
+
+msgid "File is not found."
+msgstr "ファイルが見つかりません。"
+
+msgid "First available space"
+msgstr "最初に見つかった空き"
+
+msgid "Generate"
+msgstr "字幕生成"
+
+#, c-format
+msgid "Generating *.exo file with module \"%1$ls\"..."
+msgstr "モジュール \"%1$ls\" を使用して *.exo ファイルを生成しています..."
+
+#, c-format
+msgid "Generating *json from *.opus using %1$hs..."
+msgstr "%1$hs を使用して *.opus から *.json を生成しています..."
+
+msgid "Generating JSON from Opus..."
+msgstr "Opus から JSON を生成中..."
+
+msgid "Global Settings"
+msgstr "全体設定"
+
+msgid "Initial Prompt:"
+msgstr "初期プロンプト:"
+
+msgid "Insert Mode:"
+msgstr "挿入モード:"
+
+msgid "Insert Position:"
+msgstr "挿入位置:"
+
+msgid "Invalid argument."
+msgstr "引数が間違っています。"
+
+msgid "Language:"
+msgstr "言語:"
+
+msgid "Last available space"
+msgstr "最後に見つかった空き"
+
+#, c-format
+msgid "Layer %1$d and below"
+msgstr "レイヤー %1$d 以降"
+
+msgid "Model directory:"
+msgstr "モデルの配置場所:"
+
+msgid "Model:"
+msgstr "モデル:"
+
+msgid "Module:"
+msgstr "モジュール:"
+
+msgid "NULL pointer."
+msgstr "ポインターが割り当てられていません。"
+
+msgid "No language resource found."
+msgstr "言語リソースが見つかりませんでした。"
+
+msgid "No objects found in the *.exo."
+msgstr "*.exo ファイル内にオブジェクトが見つかりませんでした。"
+
+msgid "Not found."
+msgstr "対象が見つかりませんでした。"
+
+msgid "Not implemented yet."
+msgstr "実装されていません。"
+
+msgid "Not sufficient buffer."
+msgstr "バッファが小さすぎます。"
+
+msgid "Operation completed successfully."
+msgstr "完了しました。"
+
+msgid "Operation failed."
+msgstr "失敗しました。"
+
+msgid "Out of memory."
+msgstr "メモリーが確保できません。"
+
+#, c-format
+msgid "Path to %1$hs executable:"
+msgstr "%1$hs の実行可能ファイルへのパス:"
+
+#, c-format
+msgid "Please enter the path to %1$hs executable."
+msgstr "%1$hs へのパスを入力してください。"
+
+#, c-format
+msgid "Remaining: %1$dh%2$02dm%3$02ds"
+msgstr "残り時間: %1$d時間%2$02d分%3$02d秒"
+
+#, c-format
+msgid "Remaining: %1$dm%2$02ds"
+msgstr "残り時間: %1$d分%2$02d秒"
+
+#, c-format
+msgid "Remaining: %1$ds"
+msgstr "残り時間: %1$d秒"
+
+msgid "Remaining: Almost done"
+msgstr "残り時間: ほぼ完了"
+
+#, c-format
+msgid "Remaining: Calculating%1$hs"
+msgstr "残り時間: 計算中%1$hs"
+
+msgid "STEP1: Encode audio to *.opus"
+msgstr "ステップ1: 音声を *.opus にエンコード"
+
+msgid "STEP2: Generate *.json from *.opus"
+msgstr "ステップ2: *.opus から *.json を生成"
+
+msgid "STEP3: Convert *.json to *.exo"
+msgstr "ステップ3: *.json を *.exo に変換"
+
+#, c-format
+msgid "Select %1$hs executable"
+msgstr "%1$hs の実行可能ファイルを選択してください"
+
+msgid "Select model directory"
+msgstr "モデルデータを配置するディレクトリーを選択してください"
+
+msgid "Start"
+msgstr "処理開始"
+
+msgid ""
+"Subtitle generation is internally divided into three steps.\r\n"
+"You can run each step individually using the buttons on the right.\r\n"
+"Note that if you run it from here, temporary files will not be automatically deleted."
+msgstr ""
+"字幕生成は３つのステップで構成されています。\r\n"
+"右のボタンから、それぞれのステップを単独実行できます。\r\n"
+"なお、ここから実行すると一時ファイルが自動削除されません。"
+
+msgid "Subtitler"
+msgstr "Subtitler"
+
+msgid "The Opus file is invalid."
+msgstr "不正な Opus ファイルです。"
+
+#, c-format
+msgid "The file \"%1$ls\" is not found."
+msgstr "ファイル \"%1$ls\" が見つかりません。"
+
+msgid "The file is too large."
+msgstr "ファイルが大きすぎます。"
+
+msgid "The module did not return a table."
+msgstr "モジュールがテーブルを返しませんでした。"
+
+msgid "The module is not set."
+msgstr "モジュールがセットされていません。"
+
+#, c-format
+msgid "The path to %1$hs executable is not set."
+msgstr "%1$hs へのパスがセットされていません。"
+
+msgid "The root of the JSON must be an object."
+msgstr "JSON のルートはオブジェクトでなければいけません。"
+
+#, c-format
+msgid "The root of the JSON must contain a \"%1$hs\" array."
+msgstr "JSON のルートには \"%1$hs\" 配列が含まれている必要があります。"
+
+#, c-format
+msgid "This version of %1$hs is not supported."
+msgstr "このバージョンの %1$hs には対応していません。"
+
+msgid "Unable to build error message."
+msgstr "エラーメッセージが組み立てられません。"
+
+#, c-format
+msgid "Unable to create encoder: %1$hs"
+msgstr "エンコーダーを作成できません: %1$hs"
+
+msgid "Unable to create ogg opus comments."
+msgstr "Ogg Opus Comments が作成できません。"
+
+msgid "Unable to create thread."
+msgstr "スレッドが作成できません。"
+
+#, c-format
+msgid "Unable to drain: %1$hs"
+msgstr "データを排出できません: %1$hs"
+
+msgid "Unable to get environment strings."
+msgstr "環境変数が取得できません。"
+
+#, c-format
+msgid "Unable to get system information from %1$hs."
+msgstr "%1$hs からシステム情報が取得できません。"
+
+#, c-format
+msgid "Unable to obtain window handle for %1$hs."
+msgstr "%1$hsのウィンドウハンドルが取得できません。"
+
+msgid "Unable to open the file."
+msgstr "ファイルを開けません。"
+
+#, c-format
+msgid "Unable to parse JSON: %1$hs (line: %2$d)"
+msgstr "JSONが解析できません: %1$hs (%2$d行目)"
+
+msgid "Unable to parse the *.exo."
+msgstr "*.exo を解析できません。"
+
+msgid "Unable to read the entire file."
+msgstr "ファイル全体を読み込めません。"
+
+msgid "Unable to retrieve file information."
+msgstr "ファイル情報が取得できません。"
+
+msgid "Unable to retrieve trace message."
+msgstr "トレースメッセージが取得できません。"
+
+#, c-format
+msgid "Unable to write JSON: %1$hs"
+msgstr "JSONを書き込めません: %1$hs"
+
+#, c-format
+msgid "Unable to write file: %1$hs"
+msgstr "ファイルに書き込めません: %1$hs"
+
+msgid "Unable to write the entire file."
+msgstr "データ全体をファイルに書き込めません。"
+
+msgid "Unexpected path for the module file."
+msgstr "想定外のモジュールファイルパスです。"
+
+msgid "Unexpected."
+msgstr "予期しないエラーです。"
+
+msgid "Unknown error code."
+msgstr "未知のエラーコードです。"
+
+msgid "Whisper"
+msgstr "Whisper"
+
+#, c-format
+msgid "[WARN] Package \"%1$ls\" cannot be used as a module."
+msgstr "[警告] パッケージ \"%1$ls\" はモジュールとして使用できません。"
+
+#. trans: This dagger helps UTF-8 detection. You don't need to translate this.
+msgid "†"
+msgstr "†"

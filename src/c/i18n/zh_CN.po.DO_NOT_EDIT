@@ -1,0 +1,331 @@
+# Chinese translations for subtitler vX.X.X ( fbc52c8 ) package.
+# Copyright (C) 2024 subtitler Developers
+# This file is distributed under the same license as the subtitler package.
+# Automatically generated, 2024.
+#
+msgid ""
+msgstr ""
+"Report-Msgid-Bugs-To: \n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#, c-format
+msgid "\"%1$hs\" array must contain objects."
+msgstr "\"%1$hs\" 数组必须包含对象。"
+
+#, c-format
+msgid "\"%1$hs\" function returned false."
+msgstr "函数 \"%1$hs\" 返回了 false。"
+
+#, c-format
+msgid "\"%1$hs\" is not a function."
+msgstr "\"%1$hs\" 不是一个函数。"
+
+#, c-format
+msgid "\"%1$hs\" is not a string."
+msgstr "\"%1$hs\" 不是一个字符串。"
+
+#, c-format
+msgid "\"%1$hs\" is not found in same directory."
+msgstr "\"%1$hs\" 在同一目录中未找到。"
+
+#, c-format
+msgid "\"%1$hs\" is not found."
+msgstr "\"%1$hs\" 未找到。"
+
+#, c-format
+msgid "\"%1$hs\" must return a string."
+msgstr "\"%1$hs\" 必须返回一个字符串。"
+
+msgid "\"segment\" object"
+msgstr "\"segment\" 对象"
+
+msgid "\"word\" object"
+msgstr "\"word\" 对象"
+
+#, c-format
+msgid "%1$hs must contain a \"%2$hs\" (type: %3$hs)."
+msgstr "%1$hs 必须包含 \"%2$hs\" (类型: %3$hs)。"
+
+msgid "Abort"
+msgstr "中止"
+
+msgid "Aborted."
+msgstr "已中止。"
+
+#, c-format
+msgid "Additional Arguments for %1$hs:"
+msgstr "%1$hs 的附加参数:"
+
+msgid "Advanced"
+msgstr "高级"
+
+msgid "Advanced Editing"
+msgstr "扩展编辑"
+
+msgid "An error occurred in Lua script."
+msgstr "Lua 脚本中发生错误。"
+
+msgid "AviUtl"
+msgstr "AviUtl"
+
+msgid "Converting JSON to EXO..."
+msgstr "将 JSON 转换为 EXO..."
+
+msgid "Encoding audio to Opus..."
+msgstr "正在将音频编码为 Opus..."
+
+msgid "Failed."
+msgstr "失败。"
+
+msgid "File is not found."
+msgstr "文件未找到。"
+
+msgid "First available space"
+msgstr "第一个可用空间"
+
+msgid "Generate"
+msgstr "生成"
+
+#, c-format
+msgid "Generating *.exo file with module \"%1$ls\"..."
+msgstr "使用模块 \"%1$ls\" 生成 *.exo 文件..."
+
+#, c-format
+msgid "Generating *json from *.opus using %1$hs..."
+msgstr "使用 %1$hs 从 *.opus 生成 *.json..."
+
+msgid "Generating JSON from Opus..."
+msgstr "从 Opus 生成 JSON..."
+
+msgid "Global Settings"
+msgstr "全局设置"
+
+msgid "Initial Prompt:"
+msgstr "初始提示:"
+
+msgid "Insert Mode:"
+msgstr "插入模式:"
+
+msgid "Insert Position:"
+msgstr "插入位置:"
+
+msgid "Invalid argument."
+msgstr "无效参数。"
+
+msgid "Language:"
+msgstr "语言:"
+
+msgid "Last available space"
+msgstr "最后一个可用空间"
+
+#, c-format
+msgid "Layer %1$d and below"
+msgstr "第 %1$d 层及以下"
+
+msgid "Model directory:"
+msgstr "模型目录:"
+
+msgid "Model:"
+msgstr "模型:"
+
+msgid "Module:"
+msgstr "模块:"
+
+msgid "NULL pointer."
+msgstr "空指针。"
+
+msgid "No language resource found."
+msgstr "未找到语言资源。"
+
+msgid "No objects found in the *.exo."
+msgstr "在 *.exo 中未找到对象。"
+
+msgid "Not found."
+msgstr "未找到。"
+
+msgid "Not implemented yet."
+msgstr "尚未实现。"
+
+msgid "Not sufficient buffer."
+msgstr "缓冲区不足。"
+
+msgid "Operation completed successfully."
+msgstr "操作成功完成。"
+
+msgid "Operation failed."
+msgstr "操作失败。"
+
+msgid "Out of memory."
+msgstr "内存不足。"
+
+#, c-format
+msgid "Path to %1$hs executable:"
+msgstr "%1$hs 可执行文件的路径:"
+
+#, c-format
+msgid "Please enter the path to %1$hs executable."
+msgstr "请输入 %1$hs 可执行文件的路径。"
+
+#, c-format
+msgid "Remaining: %1$dh%2$02dm%3$02ds"
+msgstr "剩余时间: %1$d小时%2$02d分%3$02d秒"
+
+#, c-format
+msgid "Remaining: %1$dm%2$02ds"
+msgstr "剩余时间: %1$d分%2$02d秒"
+
+#, c-format
+msgid "Remaining: %1$ds"
+msgstr "剩余时间: %1$d秒"
+
+msgid "Remaining: Almost done"
+msgstr "剩余时间: 快完成了"
+
+#, c-format
+msgid "Remaining: Calculating%1$hs"
+msgstr "剩余时间: 正在计算%1$hs"
+
+msgid "STEP1: Encode audio to *.opus"
+msgstr "步骤1: 将音频编码为 *.opus"
+
+msgid "STEP2: Generate *.json from *.opus"
+msgstr "步骤2: 从 *.opus 生成 *.json"
+
+msgid "STEP3: Convert *.json to *.exo"
+msgstr "步骤3: 将 *.json 转换为 *.exo"
+
+#, c-format
+msgid "Select %1$hs executable"
+msgstr "选择 %1$hs 可执行文件"
+
+msgid "Select model directory"
+msgstr "选择模型目录"
+
+msgid "Start"
+msgstr "开始"
+
+msgid ""
+"Subtitle generation is internally divided into three steps.\r\n"
+"You can run each step individually using the buttons on the right.\r\n"
+"Note that if you run it from here, temporary files will not be automatically deleted."
+msgstr ""
+"字幕生成分为三个步骤。\r\n"
+"您可以使用右侧的按钮单独运行每个步骤。\r\n"
+"请注意，如果从这里运行，临时文件不会自动删除。"
+
+msgid "Subtitler"
+msgstr "Subtitler"
+
+msgid "The Opus file is invalid."
+msgstr "Opus 文件无效。"
+
+#, c-format
+msgid "The file \"%1$ls\" is not found."
+msgstr "文件 \"%1$ls\" 未找到。"
+
+msgid "The file is too large."
+msgstr "文件太大。"
+
+msgid "The module did not return a table."
+msgstr "模块没有返回表。"
+
+msgid "The module is not set."
+msgstr "未设置模块。"
+
+#, c-format
+msgid "The path to %1$hs executable is not set."
+msgstr "未设置 %1$hs 可执行文件的路径。"
+
+msgid "The root of the JSON must be an object."
+msgstr "JSON 的根必须是一个对象。"
+
+#, c-format
+msgid "The root of the JSON must contain a \"%1$hs\" array."
+msgstr "JSON 的根必须包含一个 \"%1$hs\" 数组。"
+
+#, c-format
+msgid "This version of %1$hs is not supported."
+msgstr "不支持此版本的 %1$hs。"
+
+msgid "Unable to build error message."
+msgstr "无法构建错误消息。"
+
+#, c-format
+msgid "Unable to create encoder: %1$hs"
+msgstr "无法创建编码器: %1$hs"
+
+msgid "Unable to create ogg opus comments."
+msgstr "无法创建 ogg opus 注释。"
+
+msgid "Unable to create thread."
+msgstr "无法创建线程。"
+
+#, c-format
+msgid "Unable to drain: %1$hs"
+msgstr "无法排出: %1$hs"
+
+msgid "Unable to get environment strings."
+msgstr "无法获取环境字符串。"
+
+#, c-format
+msgid "Unable to get system information from %1$hs."
+msgstr "无法从 %1$hs 获取系统信息。"
+
+#, c-format
+msgid "Unable to obtain window handle for %1$hs."
+msgstr "无法获取 %1$hs 的窗口句柄。"
+
+msgid "Unable to open the file."
+msgstr "无法打开文件。"
+
+#, c-format
+msgid "Unable to parse JSON: %1$hs (line: %2$d)"
+msgstr "无法解析 JSON: %1$hs (行: %2$d)"
+
+msgid "Unable to parse the *.exo."
+msgstr "无法解析 *.exo。"
+
+msgid "Unable to read the entire file."
+msgstr "无法读取整个文件。"
+
+msgid "Unable to retrieve file information."
+msgstr "无法获取文件信息。"
+
+msgid "Unable to retrieve trace message."
+msgstr "无法获取跟踪消息。"
+
+#, c-format
+msgid "Unable to write JSON: %1$hs"
+msgstr "无法写入 JSON: %1$hs"
+
+#, c-format
+msgid "Unable to write file: %1$hs"
+msgstr "无法写入文件: %1$hs"
+
+msgid "Unable to write the entire file."
+msgstr "无法写入整个文件。"
+
+msgid "Unexpected path for the module file."
+msgstr "模块文件的路径意外。"
+
+msgid "Unexpected."
+msgstr "意外错误。"
+
+msgid "Unknown error code."
+msgstr "未知错误代码。"
+
+msgid "Whisper"
+msgstr "Whisper"
+
+#, c-format
+msgid "[WARN] Package \"%1$ls\" cannot be used as a module."
+msgstr "[警告] 包 \"%1$ls\" 不能用作模块。"
+
+#. trans: This dagger helps UTF-8 detection. You don't need to translate this.
+msgid "†"
+msgstr "†"

@@ -1,0 +1,21 @@
+[submodule "src/c/3rd/ovbase"]
+	path = src/c/3rd/ovbase
+	url = https://github.com/oov/ovbase
+[submodule "src/c/3rd/ovutil"]
+	path = src/c/3rd/ovutil
+	url = https://github.com/oov/ovutil
+[submodule "src/c/3rd/yyjson"]
+	path = src/c/3rd/yyjson
+	url = https://github.com/ibireme/yyjson
+[submodule "src/c/3rd/opus"]
+	path = src/c/3rd/opus
+	url = https://github.com/xiph/opus
+[submodule "src/c/3rd/opusfile"]
+	path = src/c/3rd/opusfile
+	url = https://github.com/xiph/opusfile
+[submodule "src/c/3rd/ogg"]
+	path = src/c/3rd/ogg
+	url = https://github.com/xiph/ogg
+[submodule "src/c/3rd/libopusenc"]
+	path = src/c/3rd/libopusenc
+	url = https://gitlab.xiph.org/xiph/libopusenc

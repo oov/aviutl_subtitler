@@ -1,0 +1,7 @@
+.vscode/
+aviutl/
+build/
+src/c/i18n/*.pot
+src/c/i18n/*.po
+src/c/i18n/*.mo
+src/c/i18n/.tool

@@ -1,0 +1,43 @@
+name: releaser
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+alpha[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+beta[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Get the version
+        id: get_version
+        shell: bash
+        run: |
+          echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+      - name: Build
+        shell: bash
+        run: |
+          docker run --net host -i -v .:/root/repo -w /root/repo ubuntu:22.04 /bin/bash -c 'apt update && apt install -y git curl && git config --global --add safe.directory /root/repo && bash build.bash --skip-tests --zip'
+          sudo mv build/Release/dist/Release.zip build/Release/dist/subtitler_${{ steps.get_version.outputs.tag }}.zip
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          draft: true
+          prerelease: false
+          files: build/Release/dist/*
+          body: |
+            ### ダウンロード
+            
+            - [subtitler_${{ steps.get_version.outputs.tag }}.zip](https://github.com/oov/aviutl_subtitler/releases/download/${{ steps.get_version.outputs.tag }}/subtitler_${{ steps.get_version.outputs.tag }}.zip)
+            
+            ### 変更点
+            
+            - ＊＊＊＊
