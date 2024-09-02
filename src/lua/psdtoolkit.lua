@@ -14,10 +14,6 @@ function P.get_info()
     }),
   }
 end
-function P.get_name()
-  return i18n({
-  })
-end
 
 local exo = {}
 local fileinfo = nil

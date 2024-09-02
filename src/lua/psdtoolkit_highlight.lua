@@ -12,7 +12,6 @@ function P.get_info()
       en_US = [=[Places subtitle preparation objects usable with PSDToolKit.]=],
       zh_CN = [=[放置可与PSDToolKit一起使用的字幕准备对象。]=],
     }),
-
   }
 end
 
