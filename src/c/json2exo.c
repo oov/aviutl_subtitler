@@ -435,28 +435,33 @@ static int worker(void *const userdata) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-
-  int acplen = WideCharToMultiByte(CP_ACP, 0, wbuf, wlen, NULL, 0, NULL, NULL);
-  if (acplen == 0) {
+  // The contents of *.exo should be Shift_JIS.
+  // When loading in an environment with a different code page,
+  // it is expected to be translated by the GCMZDrops conversion function.
+  enum {
+    CP_SHIFT_JIS = 932,
+  };
+  int sjislen = WideCharToMultiByte(CP_SHIFT_JIS, 0, wbuf, wlen, NULL, 0, NULL, NULL);
+  if (sjislen == 0) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-  err = OV_ARRAY_GROW(&buf, acplen);
+  err = OV_ARRAY_GROW(&buf, sjislen);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
-  if (WideCharToMultiByte(CP_ACP, 0, wbuf, wlen, buf, acplen, NULL, NULL) == 0) {
+  if (WideCharToMultiByte(CP_SHIFT_JIS, 0, wbuf, wlen, buf, sjislen, NULL, NULL) == 0) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
 
   DWORD written = 0;
-  if (!WriteFile(h, buf, (DWORD)acplen, &written, NULL)) {
+  if (!WriteFile(h, buf, (DWORD)sjislen, &written, NULL)) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-  if (written != (DWORD)acplen) {
+  if (written != (DWORD)sjislen) {
     err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to write the entire file."));
     goto cleanup;
   }
