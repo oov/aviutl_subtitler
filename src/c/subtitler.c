@@ -30,12 +30,12 @@ enum {
   id_tab = 100,
   id_tmr_progress = 101,
 
-  WM_PROCESS_LOG_LINE = WM_USER + 1,
-  WM_PROCESS_FINISHED = WM_USER + 2,
-  WM_PROCESS_NEXT_TASK = WM_USER + 3,
-  WM_PROCESS_PROGRESS = WM_USER + 4,
-  WM_PROCESS_CREATE_EXO = WM_USER + 5,
-  WM_PROCESS_UPDATED = WM_USER + 6,
+  WM_PROCESS_LOG_LINE = WM_USER + 0x1000,
+  WM_PROCESS_FINISHED = WM_USER + 0x1001,
+  WM_PROCESS_NEXT_TASK = WM_USER + 0x1002,
+  WM_PROCESS_PROGRESS = WM_USER + 0x1003,
+  WM_PROCESS_CREATE_EXO = WM_USER + 0x1004,
+  WM_PROCESS_UPDATED = WM_USER + 0x1005,
 };
 
 enum gui_state {
@@ -370,7 +370,7 @@ static void add_log(wchar_t const *const message) {
 
 static void on_next_task(void *const userdata, enum processor_type const type) {
   (void)userdata;
-  PostMessageW(g_pane_main, WM_PROCESS_NEXT_TASK, 0, (LPARAM)type);
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_NEXT_TASK, 0, (LPARAM)type);
 }
 
 static void on_progress(void *const userdata, int const progress) {
@@ -385,7 +385,7 @@ static void on_progress(void *const userdata, int const progress) {
     g_progress_info.prev_progress = g_progress_info.last_progress;
     g_progress_info.last_updated_at = now;
     g_progress_info.last_progress = progress;
-    PostMessageW(g_pane_main, WM_PROCESS_PROGRESS, 0, 0);
+    PostMessageW(aviutl_get_my_window(), WM_PROCESS_PROGRESS, 0, 0);
   }
   mtx_unlock(&g_mtx);
 }
@@ -393,7 +393,7 @@ static void on_progress(void *const userdata, int const progress) {
 static void on_create_exo(void *const userdata, struct processor_exo_info const *const info) {
   mtx_lock(&g_mtx);
   g_exo_processed = false;
-  PostMessageW(g_pane_main, WM_PROCESS_CREATE_EXO, (WPARAM)userdata, (LPARAM)info);
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_CREATE_EXO, (WPARAM)userdata, (LPARAM)info);
   while (!g_exo_processed) {
     cnd_wait(&g_cnd, &g_mtx);
   }
@@ -401,17 +401,17 @@ static void on_create_exo(void *const userdata, struct processor_exo_info const 
 }
 
 static void on_finish(void *const userdata, error e) {
-  PostMessageW(g_pane_main, WM_PROCESS_FINISHED, (WPARAM)userdata, (LPARAM)e);
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_FINISHED, (WPARAM)userdata, (LPARAM)e);
 }
 
 static void on_log_line(void *const userdata, wchar_t const *const message) {
   if (g_gui_thread_id == GetCurrentThreadId()) {
-    SendMessageW(g_pane_main, WM_PROCESS_LOG_LINE, (WPARAM)userdata, (LPARAM)message);
+    SendMessageW(aviutl_get_my_window(), WM_PROCESS_LOG_LINE, (WPARAM)userdata, (LPARAM)message);
     return;
   }
   mtx_lock(&g_mtx);
   g_log_processed = false;
-  PostMessageW(g_pane_main, WM_PROCESS_LOG_LINE, (WPARAM)userdata, (LPARAM)message);
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_LOG_LINE, (WPARAM)userdata, (LPARAM)message);
   while (!g_log_processed) {
     cnd_wait(&g_cnd, &g_mtx);
   }
@@ -724,38 +724,6 @@ subclass_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR 
       browser_model_dir();
       break;
     }
-    break;
-  case WM_PROCESS_LOG_LINE:
-    add_log((wchar_t *)lparam);
-    mtx_lock(&g_mtx);
-    g_log_processed = true;
-    cnd_signal(&g_cnd);
-    mtx_unlock(&g_mtx);
-    break;
-  case WM_PROCESS_FINISHED:
-    finish((void *)wparam, (error)lparam);
-    break;
-  case WM_PROCESS_NEXT_TASK:
-    mtx_lock(&g_mtx);
-    ULONGLONG const now = GetTickCount64();
-    g_progress_info = (struct progress){
-        .type = (enum processor_type)lparam,
-        .started_at = now,
-        .last_updated_at = now,
-        .prev_updated_at = now,
-    };
-    mtx_unlock(&g_mtx);
-    update_title();
-    break;
-  case WM_PROCESS_PROGRESS:
-    update_title();
-    break;
-  case WM_PROCESS_CREATE_EXO:
-    create_exo((void *)wparam, (struct processor_exo_info *)lparam);
-    mtx_lock(&g_mtx);
-    g_exo_processed = true;
-    cnd_signal(&g_cnd);
-    mtx_unlock(&g_mtx);
     break;
   }
   return DefSubclassProc(window, message, wparam, lparam);
@@ -1376,6 +1344,38 @@ static BOOL filter_wndproc(HWND const window,
     MINMAXINFO *pmmi = (MINMAXINFO *)lparam;
     pmmi->ptMinTrackSize.x = 600;
     pmmi->ptMinTrackSize.y = 360;
+  } break;
+  case WM_PROCESS_LOG_LINE:
+    add_log((wchar_t *)lparam);
+    mtx_lock(&g_mtx);
+    g_log_processed = true;
+    cnd_signal(&g_cnd);
+    mtx_unlock(&g_mtx);
+    break;
+  case WM_PROCESS_FINISHED:
+    finish((void *)wparam, (error)lparam);
+    break;
+  case WM_PROCESS_NEXT_TASK:
+    mtx_lock(&g_mtx);
+    ULONGLONG const now = GetTickCount64();
+    g_progress_info = (struct progress){
+        .type = (enum processor_type)lparam,
+        .started_at = now,
+        .last_updated_at = now,
+        .prev_updated_at = now,
+    };
+    mtx_unlock(&g_mtx);
+    update_title();
+    break;
+  case WM_PROCESS_PROGRESS:
+    update_title();
+    break;
+  case WM_PROCESS_CREATE_EXO: {
+    create_exo((void *)wparam, (struct processor_exo_info *)lparam);
+    mtx_lock(&g_mtx);
+    g_exo_processed = true;
+    cnd_signal(&g_cnd);
+    mtx_unlock(&g_mtx);
   } break;
   case WM_PROCESS_UPDATED:
     return TRUE;
