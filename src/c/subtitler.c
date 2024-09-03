@@ -423,8 +423,12 @@ static void create_exo(void *const userdata, struct processor_exo_info const *co
   struct config const *const cfg = processor_get_config(g_processor);
   char *s = NULL;
   int layer;
-  error err =
-      aviutl_find_space(info->layer_max, config_get_insert_position(cfg) - 1, config_get_insert_mode(cfg) == 2, &layer);
+  error err = aviutl_find_space(info->start_frame,
+                                info->end_frame,
+                                info->layer_max,
+                                config_get_insert_position(cfg) - 1,
+                                config_get_insert_mode(cfg) == 2,
+                                &layer);
   if (efailed(err)) {
     ereport(err);
     return;

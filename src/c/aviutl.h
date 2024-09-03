@@ -39,7 +39,9 @@ NODISCARD error aviutl_get_patch(enum aviutl_patched *const patched);
 NODISCARD HWND aviutl_get_my_window(void);
 
 NODISCARD error aviutl_drop_exo(char const *const exo_path, int frame, int layer, int frames);
-NODISCARD error aviutl_find_space(int const required_spaces,
+NODISCARD error aviutl_find_space(int start_frame,
+                                  int end_frame,
+                                  int const required_spaces,
                                   int const search_offset,
                                   bool const last,
                                   int *const found_target);

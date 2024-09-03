@@ -412,7 +412,9 @@ static bool get_exedit(struct exedit *const e) {
   return true;
 }
 
-NODISCARD error aviutl_find_space(int const required_spaces,
+NODISCARD error aviutl_find_space(int start_frame,
+                                  int end_frame,
+                                  int const required_spaces,
                                   int const search_offset,
                                   bool const last,
                                   int *const found_target) {
@@ -426,32 +428,16 @@ NODISCARD error aviutl_find_space(int const required_spaces,
     err = errg(err_fail);
     goto cleanup;
   }
-  int begin_frame, end_frame;
-  if (!g_fp->exfunc->get_select_frame(g_editp, &begin_frame, &end_frame)) {
-    begin_frame = 0;
-    end_frame = g_fp->exfunc->get_frame_n(g_editp) - 1;
-  }
   ++end_frame;
 
 #if DEBUG_OUTPUT
-  mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), NULL, "start_frame: %d end_frame: %d", begin_frame, end_frame);
+  mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), NULL, "start_frame: %d end_frame: %d", start_frame, end_frame);
   OutputDebugStringW(buf);
 #endif
 
   int target_layer = -1;
   int found_spaces = 0;
   for (int layer = search_offset; layer < 100; ++layer) {
-    int32_t const count = ex.active_scene_sorted_object_layer_end_index[layer] -
-                          ex.active_scene_sorted_object_layer_begin_index[layer] + 1;
-    if (count == 0) {
-      if (++found_spaces == required_spaces) {
-        target_layer = layer - required_spaces;
-        if (!last) {
-          break;
-        }
-      }
-      continue;
-    }
     int32_t const sidx = ex.active_scene_sorted_object_layer_begin_index[layer];
     int32_t const eidx = ex.active_scene_sorted_object_layer_end_index[layer];
     bool blocked = false;
@@ -470,14 +456,20 @@ NODISCARD error aviutl_find_space(int const required_spaces,
                         namebuf);
       OutputDebugStringW(buf);
 #endif
-      if ((o->frame_end + 1 <= begin_frame || end_frame <= o->frame_begin)) {
+      int const obegin = o->frame_begin;
+      int const oend = o->frame_end + 1;
+      if ((start_frame <= obegin && obegin <= end_frame) || (start_frame <= oend && oend <= end_frame) ||
+          (obegin <= start_frame && end_frame <= oend)) {
+#if DEBUG_OUTPUT
+        mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), NULL, "blocked: layer %d", layer + 1);
+        OutputDebugStringW(buf);
+#endif
         blocked = true;
+        found_spaces = 0;
         break;
       }
     }
     if (!blocked) {
-      found_spaces = 0;
-    } else {
       if (++found_spaces == required_spaces) {
         target_layer = layer - required_spaces;
         if (!last) {
@@ -487,8 +479,7 @@ NODISCARD error aviutl_find_space(int const required_spaces,
     }
   }
 #if DEBUG_OUTPUT
-  mo_snprintf_wchar(
-      buf, sizeof(buf) / sizeof(wchar_t), L"%1$d", "target_layer: %d", target_layer - required_space + 1 + 1);
+  mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$d", "target_layer: %d", target_layer + 1 + 1);
   OutputDebugStringW(buf);
 #endif
   if (found_target) {
