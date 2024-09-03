@@ -115,7 +115,7 @@ function P.on_start(fi)
 end
 
 function P.on_segment(seg)
-  local num_chars = 0
+  local segments = {}
   for i, word in ipairs(seg.words) do
     local endsec
     if i == #seg.words then
@@ -123,14 +123,19 @@ function P.on_segment(seg)
     else
       endsec = math.max(word["end"], seg.words[i+1].start)
     end
-    num_chars = num_chars + #word.word
+    table.insert(segments, string.format("%q", word.word))
     add_item(
       2,
       math.floor(word.start * fileinfo.rate / fileinfo.scale),
       math.floor(endsec * fileinfo.rate / fileinfo.scale)-1,
-      "<?=c1?>" .. seg.text:sub(0,num_chars) .. "<?=c2?>" .. seg.text:sub(num_chars+1)
+      "<?i="..i.."?>"
     )
   end
+  add_item(
+    3,
+    math.floor(seg.start * fileinfo.rate / fileinfo.scale),
+    math.floor(seg["end"] * fileinfo.rate / fileinfo.scale)-1,
+    "<?t={" .. table.concat(segments, ",") .. "}\r\nmes(c1..table.concat(t,'',1,i)..c2..table.concat(t,'',i+1))?>")
   debug_print(string.format("%7.2fs - %7.2fs %s", seg.start, seg["end"], seg.text))
   return true
 end
