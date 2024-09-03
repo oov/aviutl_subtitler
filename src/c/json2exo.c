@@ -299,37 +299,61 @@ static bool is_number_only(char const *s, size_t const len) {
   return true;
 }
 
-static bool
-find_used_layer_range(char const *const exo, int *const num_objects, int *const layer_min, int *const layer_max) {
+static bool find_used_layer_range(
+    char const *const exo, int *const num_objects, int *const layer_min, int *const layer_max, int *const frames) {
   if (!exo || !layer_min || !layer_max) {
     return false;
   }
   int lmin = INT_MAX;
   int lmax = INT_MIN;
-  int layer;
+  int fmax = INT_MIN;
+  int64_t v64;
+  int v;
   int objects = 0;
   char const *pos = exo;
   char const *line_end = find_line_break(exo);
-  bool object_section = false;
+  enum section {
+    section_unknown,
+    section_header,
+    section_object,
+  } section = section_unknown;
   while (line_end) {
     size_t const len = (size_t)(line_end - pos);
     if (len > 2 && pos[0] == '[' && pos[len - 1] == ']') {
-      // find [%d]
-      object_section = is_number_only(pos + 1, len - 2);
-      if (object_section) {
+      if (len == 8 && memcmp(pos + 1, "exedit", 6) == 0) {
+        section = section_header; // [exedit]
+      } else if (is_number_only(pos + 1, len - 2)) {
+        section = section_object; // [%d]
         ++objects;
+      } else {
+        section = section_unknown; // not interested
       }
-    } else if (object_section && len > 6 && strncmp(pos, "layer=", 6) == 0) {
-      // find layer=%d
-      if (is_number_only(pos + 6, len - 6)) {
-        int64_t v;
-        if (ov_atoi_char(pos + 6, &v, false)) {
-          layer = (int)v;
-          if (layer < lmin) {
-            lmin = layer;
+    } else {
+      if (section == section_header && len > 7 && strncmp(pos, "length=", 7) == 0 &&
+          is_number_only(pos + 7, len - 7)) { // length=%d
+        if (ov_atoi_char(pos + 7, &v64, false)) {
+          v = (int)v64;
+          if (v > fmax) {
+            fmax = v;
           }
-          if (layer > lmax) {
-            lmax = layer;
+        }
+      } else if (section == section_object && len > 6 && strncmp(pos, "layer=", 6) == 0 &&
+                 is_number_only(pos + 6, len - 6)) { // layer=%d
+        if (ov_atoi_char(pos + 6, &v64, false)) {
+          v = (int)v64;
+          if (v < lmin) {
+            lmin = v;
+          }
+          if (v > lmax) {
+            lmax = v;
+          }
+        }
+      } else if (section == section_object && len > 4 && strncmp(pos, "end=", 4) == 0 &&
+                 is_number_only(pos + 4, len - 4)) { // end=%d
+        if (ov_atoi_char(pos + 4, &v64, false)) {
+          v = (int)v64;
+          if (v > fmax) {
+            fmax = v;
           }
         }
       }
@@ -340,6 +364,7 @@ find_used_layer_range(char const *const exo, int *const num_objects, int *const 
   *num_objects = objects;
   *layer_min = lmin;
   *layer_max = lmax;
+  *frames = fmax;
   return true;
 }
 
@@ -350,7 +375,7 @@ static int worker(void *const userdata) {
   char *buf = NULL;
   wchar_t *wbuf = NULL;
   HANDLE h = INVALID_HANDLE_VALUE;
-  int num_objects = 0, lmin = INT_MAX, lmax = INT_MIN;
+  int num_objects = 0, lmin = INT_MAX, lmax = INT_MIN, fmax = INT_MIN;
 
   lua_State *L = luactx_get(ctx->luactx);
   lua_getfield(L, ctx->module_index, "on_start");
@@ -407,7 +432,7 @@ static int worker(void *const userdata) {
     goto cleanup;
   }
 
-  if (!find_used_layer_range(exo_utf8, &num_objects, &lmin, &lmax)) {
+  if (!find_used_layer_range(exo_utf8, &num_objects, &lmin, &lmax, &fmax)) {
     err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to parse the *.exo."));
     goto cleanup;
   }
@@ -487,7 +512,7 @@ cleanup:
     ctx->on_finish(ctx->userdata, efailed(err) ? NULL : &(struct json2exo_info){
       .exo_path = ctx->exo_path,
       .start_frame = ctx->start_frame,
-      .end_frame = ctx->end_frame,
+      .end_frame = ctx->start_frame + fmax - 1,
                          .layer_min = lmin,
                          .layer_max = lmax,
                          .num_objects = num_objects,
