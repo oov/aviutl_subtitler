@@ -322,6 +322,9 @@ msgstr "未知错误代码。"
 msgid "Whisper"
 msgstr "Whisper"
 
+msgid "[WARN] Do not touch other windows while processing."
+msgstr "[警告] 处理中请勿触摸其他窗口。"
+
 #, c-format
 msgid "[WARN] Package \"%1$ls\" cannot be used as a module."
 msgstr "[警告] 包 \"%1$ls\" 不能用作模块。"

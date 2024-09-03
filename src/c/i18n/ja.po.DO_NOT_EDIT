@@ -323,6 +323,9 @@ msgstr "未知のエラーコードです。"
 msgid "Whisper"
 msgstr "Whisper"
 
+msgid "[WARN] Do not touch other windows while processing."
+msgstr "[警告] 処理中は他のウィンドウを触らないでください。"
+
 #, c-format
 msgid "[WARN] Package \"%1$ls\" cannot be used as a module."
 msgstr "[警告] パッケージ \"%1$ls\" はモジュールとして使用できません。"

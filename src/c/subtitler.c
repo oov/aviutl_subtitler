@@ -532,10 +532,23 @@ static void run(enum processor_type const type) {
     err = ethru(err);
     goto cleanup;
   }
-  err = disable_family_windows(aviutl_get_my_window(), &g_disabled_windows);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
+  HWND window = aviutl_get_my_window();
+  if (GetParent(window) == NULL) {
+    err = disable_family_windows(window, &g_disabled_windows);
+    if (efailed(err)) {
+      err = ethru(err);
+      goto cleanup;
+    }
+  } else {
+    // It seems that the window is not a parent window due to the influence of other plugins.
+    // The situation is unpredictable because it is independent or docked, so just display a warning message.
+    wchar_t buf[512];
+    mo_snprintf_wchar(buf,
+                      sizeof(buf) / sizeof(wchar_t),
+                      L"%1$hs",
+                      "%1$hs",
+                      gettext("[WARN] Do not touch other windows while processing."));
+    add_log(buf);
   }
   NODISCARD error (*fn)(struct processor_context *const) = NULL;
   switch (type) {
