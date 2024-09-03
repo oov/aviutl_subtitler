@@ -221,9 +221,12 @@ HWND aviutl_get_my_window(void) {
 
 static void *calc_offset(void const *const addr, size_t const offset) { return (void *)((uintptr_t)addr + offset); }
 
-NODISCARD error aviutl_drop_exo(char const *const exo_path, int frame, int layer) {
-  typedef BOOL(__cdecl * load_from_exo_fn)(char const *const path, int frame, int layer, void *editp, FILTER *fp);
+NODISCARD error aviutl_drop_exo(char const *const exo_path, int frame, int layer, int frames) {
+  typedef void(__cdecl * grow_fn)(FILTER * fp, void *editp, int n);
+  typedef BOOL(__cdecl * load_from_exo_fn)(char const *path, int frame, int layer, void *editp, FILTER *fp);
+  grow_fn const grow = (grow_fn)(calc_offset(g_exedit_fp->dll_hinst, 0x3b1d0));
   load_from_exo_fn const load_from_exo = (load_from_exo_fn)(calc_offset(g_exedit_fp->dll_hinst, 0x4dca0));
+  grow(g_exedit_fp, g_editp, frames + 1);
   if (!load_from_exo(exo_path, frame, layer, g_editp, g_exedit_fp)) {
     return errg(err_fail);
   }

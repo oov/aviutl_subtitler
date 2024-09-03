@@ -443,7 +443,7 @@ static void create_exo(void *const userdata, struct processor_exo_info const *co
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-  err = aviutl_drop_exo(s, info->start_frame, layer);
+  err = aviutl_drop_exo(s, info->start_frame, layer, info->end_frame);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
