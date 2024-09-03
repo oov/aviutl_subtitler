@@ -162,10 +162,12 @@ static NODISCARD error parse(HANDLE src,
       err = ethru(err);
       goto cleanup;
     }
-    err = on_progress(userdata, (int)((i + 1) * 10000 / num_segments));
-    if (efailed(err)) {
-      err = errg(err_abort);
-      goto cleanup;
+    if (on_progress) {
+      err = on_progress(userdata, (int)((i + 1) * 10000 / num_segments));
+      if (efailed(err)) {
+        err = errg(err_abort);
+        goto cleanup;
+      }
     }
   }
 cleanup:
@@ -368,6 +370,14 @@ static bool find_used_layer_range(
   return true;
 }
 
+static NODISCARD error find_max_time(void *const userdata, struct segment const *const seg) {
+  double *const max_time = userdata;
+  if (seg->end > *max_time) {
+    *max_time = seg->end;
+  }
+  return eok();
+}
+
 static int worker(void *const userdata) {
   struct json2exo_context *ctx = userdata;
 
@@ -376,6 +386,17 @@ static int worker(void *const userdata) {
   wchar_t *wbuf = NULL;
   HANDLE h = INVALID_HANDLE_VALUE;
   int num_objects = 0, lmin = INT_MAX, lmax = INT_MIN, fmax = INT_MIN;
+
+  double max_time = 0;
+  err = parse(ctx->json, find_max_time, NULL, &max_time);
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+  if (SetFilePointer(ctx->json, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
+    err = errhr(HRESULT_FROM_WIN32(GetLastError()));
+    goto cleanup;
+  }
 
   lua_State *L = luactx_get(ctx->luactx);
   lua_getfield(L, ctx->module_index, "on_start");
@@ -392,7 +413,7 @@ static int worker(void *const userdata) {
   lua_setfield(L, -2, "rate");
   lua_pushinteger(L, ctx->fi.video_scale);
   lua_setfield(L, -2, "scale");
-  lua_pushinteger(L, ctx->fi.frame_n);
+  lua_pushinteger(L, (int)(max_time * ctx->fi.video_rate / ctx->fi.video_scale - 1));
   lua_setfield(L, -2, "length");
   lua_pushinteger(L, ctx->fi.audio_rate);
   lua_setfield(L, -2, "audio_rate");
