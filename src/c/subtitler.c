@@ -1159,8 +1159,8 @@ static void filter_gui_resize(HWND const window, void *const editp, FILTER *cons
   y += tm.tmHeight;
   MoveWindow(g_edt_model_dir, x, y, item_width4 * 2 - item_height * 2 - padding, item_height, TRUE);
   x += item_width4 * 2 - item_height * 2 - padding;
-  MoveWindow(g_btn_model_dir, x, y, item_height * 2 - padding, item_height, TRUE);
-  x += item_height * 2;
+  MoveWindow(g_btn_model_dir, x, y, item_height * 2, item_height, TRUE);
+  x += item_height * 2 + padding;
   MoveWindow(g_edt_additional_args, x, y, item_width4 * 2, item_height, TRUE);
 
   // Advanced tab
