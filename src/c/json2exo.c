@@ -197,7 +197,6 @@ struct json2exo_context {
   HANDLE json;
   wchar_t *exo_path;
   int start_frame;
-  int end_frame;
 };
 
 static NODISCARD error on_progress(void *const userdata, int const progress) {
@@ -575,7 +574,6 @@ NODISCARD error json2exo_create(struct json2exo_context **const ctxpp, struct js
       s = 0;
     }
     ctx->start_frame = s;
-    ctx->end_frame = e;
     ctx->fi.frame_n = e - s + 1;
   }
 
