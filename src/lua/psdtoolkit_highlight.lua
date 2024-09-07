@@ -105,12 +105,6 @@ function P.on_start(fi)
     )
   )
   fileinfo = fi
-  add_item(
-    1,
-    1,
-    fi.length,
-    '<?c1,c2="<#ffffff,000000>","<#333333,000000>"?>'
-  )
   return true
 end
 
@@ -125,17 +119,18 @@ function P.on_segment(seg)
     end
     table.insert(segments, string.format("%q", word.word))
     add_item(
-      2,
-      math.floor(word.start * fileinfo.rate / fileinfo.scale),
-      math.floor(endsec * fileinfo.rate / fileinfo.scale)-1,
-      "<?i="..i.."?>"
+      1,
+      math.floor(word.start * fileinfo.rate / fileinfo.scale) + 1,
+      math.floor(endsec * fileinfo.rate / fileinfo.scale),
+      '<?\r\n--[[\r\ncolor2 = "<#333333,000000>"\r\n--]]sbtr={idx='..i..';set=function(self,text)require(\"PSDToolKit\").subtitle:set(table.concat(text,"",1,self.idx)..(color2 or "<#333333,000000>")..table.concat(text,"",self.idx+1),obj,false)color2=nil end}\r\n?>'
     )
   end
   add_item(
-    3,
-    math.floor(seg.start * fileinfo.rate / fileinfo.scale),
-    math.floor(seg["end"] * fileinfo.rate / fileinfo.scale)-1,
-    "<?t={" .. table.concat(segments, ",") .. "}\r\nrequire(\"PSDToolKit\").subtitle:set(c1..table.concat(t,'',1,i)..c2..table.concat(t,'',i+1),obj,true)?>")
+    2,
+    math.floor(seg.start * fileinfo.rate / fileinfo.scale) + 1,
+    math.floor(seg["end"] * fileinfo.rate / fileinfo.scale),
+    "<?sbtr:set({\r\n" .. table.concat(segments, ",") .. "\r\n});sbtr=nil?>"
+  )
   debug_print(string.format("%7.2fs - %7.2fs %s", seg.start, seg["end"], seg.text))
   return true
 end

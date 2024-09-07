@@ -428,7 +428,6 @@ NODISCARD error aviutl_find_space(int start_frame,
     err = errg(err_fail);
     goto cleanup;
   }
-  ++end_frame;
 
 #if DEBUG_OUTPUT
   mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), NULL, "start_frame: %d end_frame: %d", start_frame, end_frame);
@@ -457,7 +456,7 @@ NODISCARD error aviutl_find_space(int start_frame,
       OutputDebugStringW(buf);
 #endif
       int const obegin = o->frame_begin;
-      int const oend = o->frame_end + 1;
+      int const oend = o->frame_end;
       if ((start_frame <= obegin && obegin <= end_frame) || (start_frame <= oend && oend <= end_frame) ||
           (obegin <= start_frame && end_frame <= oend)) {
 #if DEBUG_OUTPUT

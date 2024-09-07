@@ -418,13 +418,18 @@ static void on_log_line(void *const userdata, wchar_t const *const message) {
   mtx_unlock(&g_mtx);
 }
 
-static void create_exo(void *const userdata, struct processor_exo_info const *const info) {
+static void
+create_exo(void *const userdata, struct processor_exo_info const *const info, FILTER *const fp, void *const editp) {
   (void)userdata;
+  int s, e;
+  if (!fp->exfunc->get_select_frame(editp, &s, &e)) {
+    s = 0;
+  }
   struct config const *const cfg = processor_get_config(g_processor);
-  char *s = NULL;
+  char *str = NULL;
   int layer;
-  error err = aviutl_find_space(info->start_frame,
-                                info->end_frame,
+  error err = aviutl_find_space(s,
+                                s + info->length - 1,
                                 info->layer_max,
                                 config_get_insert_position(cfg) - 1,
                                 config_get_insert_mode(cfg) == 2,
@@ -438,16 +443,16 @@ static void create_exo(void *const userdata, struct processor_exo_info const *co
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-  err = OV_ARRAY_GROW(&s, len);
+  err = OV_ARRAY_GROW(&str, len);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
-  if (WideCharToMultiByte(CP_ACP, 0, info->exo_path, -1, s, len, NULL, NULL) == 0) {
+  if (WideCharToMultiByte(CP_ACP, 0, info->exo_path, -1, str, len, NULL, NULL) == 0) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
-  err = aviutl_drop_exo(s, info->start_frame, layer, info->end_frame);
+  err = aviutl_drop_exo(str, s, layer, info->length);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -455,7 +460,7 @@ static void create_exo(void *const userdata, struct processor_exo_info const *co
   PostMessageW(aviutl_get_my_window(), WM_PROCESS_UPDATED, 0, 0);
 cleanup:
   ereport(err);
-  OV_ARRAY_DESTROY(&s);
+  OV_ARRAY_DESTROY(&str);
 }
 
 static void error_to_log(error e) {
@@ -1388,7 +1393,7 @@ static BOOL filter_wndproc(HWND const window,
     update_title();
     break;
   case WM_PROCESS_CREATE_EXO: {
-    create_exo((void *)wparam, (struct processor_exo_info *)lparam);
+    create_exo((void *)wparam, (struct processor_exo_info *)lparam, fp, editp);
     mtx_lock(&g_mtx);
     g_exo_processed = true;
     cnd_signal(&g_cnd);

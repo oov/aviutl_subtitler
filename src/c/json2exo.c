@@ -196,7 +196,6 @@ struct json2exo_context {
   int module_index;
   HANDLE json;
   wchar_t *exo_path;
-  int start_frame;
 };
 
 static NODISCARD error on_progress(void *const userdata, int const progress) {
@@ -412,7 +411,7 @@ static int worker(void *const userdata) {
   lua_setfield(L, -2, "rate");
   lua_pushinteger(L, ctx->fi.video_scale);
   lua_setfield(L, -2, "scale");
-  lua_pushinteger(L, (int)(max_time * ctx->fi.video_rate / ctx->fi.video_scale - 1));
+  lua_pushinteger(L, (int)(max_time * ctx->fi.video_rate / ctx->fi.video_scale));
   lua_setfield(L, -2, "length");
   lua_pushinteger(L, ctx->fi.audio_rate);
   lua_setfield(L, -2, "audio_rate");
@@ -531,12 +530,11 @@ cleanup:
   if (ctx->on_finish) {
     ctx->on_finish(ctx->userdata, efailed(err) ? NULL : &(struct json2exo_info){
       .exo_path = ctx->exo_path,
-      .start_frame = ctx->start_frame,
-      .end_frame = ctx->start_frame + fmax - 1,
-                         .layer_min = lmin,
-                         .layer_max = lmax,
-                         .num_objects = num_objects,
-                     }, err);
+      .length = fmax,
+      .layer_min = lmin,
+      .layer_max = lmax,
+      .num_objects = num_objects,
+    }, err);
   }
   return 0;
 }
@@ -568,13 +566,6 @@ NODISCARD error json2exo_create(struct json2exo_context **const ctxpp, struct js
       err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to retrieve file information."));
       goto cleanup;
     }
-    int s, e;
-    if (!fp->exfunc->get_select_frame(editp, &s, &e)) {
-      e = fp->exfunc->get_frame_n(editp);
-      s = 0;
-    }
-    ctx->start_frame = s;
-    ctx->fi.frame_n = e - s + 1;
   }
 
   err = luactx_create(&ctx->luactx,

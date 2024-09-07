@@ -476,8 +476,7 @@ json2exo_on_finish_core(void *const userdata, struct json2exo_info const *const 
     p->params.on_create_exo(p->params.userdata,
                             &(struct processor_exo_info){
                                 .exo_path = info->exo_path,
-                                .start_frame = info->start_frame,
-                                .end_frame = info->end_frame,
+                                .length = info->length,
                                 .layer_min = info->layer_min,
                                 .layer_max = info->layer_max,
                             });

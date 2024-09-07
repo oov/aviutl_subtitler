@@ -16,8 +16,7 @@ enum processor_type {
 
 struct processor_exo_info {
   wchar_t const *exo_path;
-  int start_frame;
-  int end_frame;
+  int length;
   int layer_min;
   int layer_max;
 };

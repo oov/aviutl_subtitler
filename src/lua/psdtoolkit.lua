@@ -111,8 +111,8 @@ end
 function P.on_segment(seg)
   add_item(
     1,
-    math.floor(seg.start * fileinfo.rate / fileinfo.scale),
-    math.floor(seg["end"] * fileinfo.rate / fileinfo.scale)-1,
+    math.floor(seg.start * fileinfo.rate / fileinfo.scale) + 1,
+    math.floor(seg["end"] * fileinfo.rate / fileinfo.scale),
     "<?s=[==[\r\n" .. seg.text .. "\r\n]==];require(\"PSDToolKit\").subtitle:set(s,obj,true);s=nil?>"
   )
   debug_print(string.format("%7.2fs - %7.2fs %s", seg.start, seg["end"], seg.text))

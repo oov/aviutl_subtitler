@@ -8,8 +8,7 @@ struct json2exo_context;
 
 struct json2exo_info {
   wchar_t const *exo_path;
-  int start_frame;
-  int end_frame;
+  int length;
   int layer_min;
   int layer_max;
   int num_objects;
