@@ -227,8 +227,8 @@ NODISCARD error aviutl_drop_exo(char const *const exo_path, int frame, int layer
   int *const end_frame = (int *)(calc_offset(g_exedit_fp->dll_hinst, 0x1a5318));
   set_end_frame_fn const set_end_frame = (set_end_frame_fn)(calc_offset(g_exedit_fp->dll_hinst, 0x3b1d0));
   load_from_exo_fn const load_from_exo = (load_from_exo_fn)(calc_offset(g_exedit_fp->dll_hinst, 0x4dca0));
-  if (*end_frame < frames + 1) {
-    set_end_frame(g_exedit_fp, g_editp, frames + 1);
+  if (*end_frame < frame + frames) {
+    set_end_frame(g_exedit_fp, g_editp, frame + frames);
   }
   if (!load_from_exo(exo_path, frame, layer, g_editp, g_exedit_fp)) {
     return errg(err_fail);
