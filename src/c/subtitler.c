@@ -109,6 +109,7 @@ static struct progress {
   ULONGLONG started_at;
   ULONGLONG prev_updated_at;
   ULONGLONG last_updated_at;
+  ULONGLONG last_posted_at;
   enum processor_type type;
   int prev_progress;
   int last_progress;
@@ -377,15 +378,17 @@ static void on_progress(void *const userdata, int const progress) {
   (void)userdata;
   ULONGLONG const now = GetTickCount64();
   mtx_lock(&g_mtx);
-  int const diff = (int)(now - g_progress_info.last_updated_at);
+  g_progress_info.prev_updated_at = g_progress_info.last_updated_at;
+  g_progress_info.prev_progress = g_progress_info.last_progress;
+  g_progress_info.last_updated_at = now;
+  g_progress_info.last_progress = progress;
+
   // If the frequency is too high, it will affect the processing speed.
   // So it will be thinned out appropriately.
+  int const diff = (int)(now - g_progress_info.last_posted_at);
   if (diff > 200) {
-    g_progress_info.prev_updated_at = g_progress_info.last_updated_at;
-    g_progress_info.prev_progress = g_progress_info.last_progress;
-    g_progress_info.last_updated_at = now;
-    g_progress_info.last_progress = progress;
     PostMessageW(aviutl_get_my_window(), WM_PROCESS_PROGRESS, 0, 0);
+    g_progress_info.last_posted_at = now;
   }
   mtx_unlock(&g_mtx);
 }
