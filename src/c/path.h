@@ -5,6 +5,7 @@
 #include <ovutil/win32.h>
 
 NODISCARD error path_get_temp_file(wchar_t **const path, wchar_t const *const filename);
+NODISCARD error path_get_module_name(wchar_t **const module_path, HINSTANCE const hinst);
 wchar_t const *path_extract_file_name_const(wchar_t const *const path);
 wchar_t *path_extract_file_name_mut(wchar_t *const path);
 #define path_extract_file_name(path)                                                                                   \

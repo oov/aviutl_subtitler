@@ -1,14 +1,17 @@
 #include "aviutl.h"
 
+#include <ovarray.h>
 #include <ovutil/str.h>
 #include <ovutil/win32.h>
 
 #include <string.h>
 
 #include "i18n.h"
+#include "path.h"
 
 static FILTER *g_fp = NULL;
 static void *g_editp = NULL;
+static HMODULE g_lua51 = NULL;
 
 static FILTER *g_exedit_fp = NULL;
 static enum aviutl_patched g_exedit_patch = aviutl_patched_default;
@@ -159,6 +162,43 @@ void aviutl_get_pointers(FILTER **const fp, void **const editp) {
   }
 }
 
+NODISCARD static error load_lua51(HMODULE *const module) {
+  static wchar_t const dllname[] = L"lua51.dll";
+  wchar_t *lua51 = NULL;
+  HMODULE h = NULL;
+  error err = path_get_module_name(&lua51, get_hinstance());
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+
+  wchar_t *name = path_extract_file_name_mut(lua51);
+  if (!name) {
+    err = errg(err_unexpected);
+    goto cleanup;
+  }
+  *name = L'\0';
+  err = OV_ARRAY_GROW(&lua51, (size_t)(name - lua51) + sizeof(dllname) / sizeof(wchar_t));
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+  wcscat(lua51, dllname);
+  h = LoadLibraryW(lua51);
+  if (!h) {
+    err = errhr(HRESULT_FROM_WIN32(GetLastError()));
+    goto cleanup;
+  }
+  *module = h;
+  h = NULL;
+cleanup:
+  if (h != NULL) {
+    FreeLibrary(h);
+  }
+  OV_ARRAY_DESTROY(&lua51);
+  return err;
+}
+
 error aviutl_init(void) {
   FILTER *exedit_fp = NULL;
   enum aviutl_patched patched = aviutl_patched_default;
@@ -184,6 +224,13 @@ error aviutl_init(void) {
     err = ethru(err);
     goto cleanup;
   }
+  // lua51.dll will be lazily loaded, but may fail if it is not on the search path.
+  // To avoid this, load with the full path first.
+  err = load_lua51(&g_lua51);
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
   g_exedit_fp = exedit_fp;
   g_exedit_patch = patched;
 cleanup:
@@ -192,7 +239,13 @@ cleanup:
 
 bool aviutl_initalized(void) { return g_exedit_fp; }
 
-error aviutl_exit(void) { return eok(); }
+error aviutl_exit(void) {
+  if (g_lua51) {
+    FreeLibrary(g_lua51);
+    g_lua51 = NULL;
+  }
+  return eok();
+}
 
 NODISCARD error aviutl_get_patch(enum aviutl_patched *const patched) {
   if (!patched) {

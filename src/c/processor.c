@@ -22,31 +22,8 @@ static NODISCARD error run_raw2opus(struct processor_context *const p, bool cons
 static NODISCARD error run_opus2json(struct processor_context *const p, bool const solo);
 static NODISCARD error run_json2exo(struct processor_context *const p, bool const solo);
 
-static NODISCARD error get_module_name(wchar_t **const module_path, HINSTANCE const hinst) {
-  DWORD n = 0, r;
-  error err = eok();
-  for (;;) {
-    err = OV_ARRAY_GROW(module_path, n += MAX_PATH);
-    if (efailed(err)) {
-      err = ethru(err);
-      goto cleanup;
-    }
-    r = GetModuleFileNameW(hinst, *module_path, n);
-    if (r == 0) {
-      err = errhr(HRESULT_FROM_WIN32(GetLastError()));
-      goto cleanup;
-    }
-    if (r < n) {
-      OV_ARRAY_SET_LENGTH(*module_path, r);
-      break;
-    }
-  }
-cleanup:
-  return err;
-}
-
 static NODISCARD error get_json_path(wchar_t **const json_path, HINSTANCE const hinst) {
-  error err = get_module_name(json_path, hinst);
+  error err = path_get_module_name(json_path, hinst);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -63,7 +40,7 @@ cleanup:
 
 static NODISCARD error get_lua_directory(wchar_t **const lua_path, HINSTANCE const hinst) {
   static wchar_t const directory[] = L"Subtitler";
-  error err = get_module_name(lua_path, hinst);
+  error err = path_get_module_name(lua_path, hinst);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -88,7 +65,7 @@ static NODISCARD error get_target_file_path(wchar_t **const path,
                                             bool const solo,
                                             wchar_t const *const ext) {
   wchar_t *module_name = NULL;
-  error err = get_module_name(&module_name, hinst);
+  error err = path_get_module_name(&module_name, hinst);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;

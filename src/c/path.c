@@ -55,6 +55,29 @@ cleanup:
   return err;
 }
 
+NODISCARD error path_get_module_name(wchar_t **const module_path, HINSTANCE const hinst) {
+  DWORD n = 0, r;
+  error err = eok();
+  for (;;) {
+    err = OV_ARRAY_GROW(module_path, n += MAX_PATH);
+    if (efailed(err)) {
+      err = ethru(err);
+      goto cleanup;
+    }
+    r = GetModuleFileNameW(hinst, *module_path, n);
+    if (r == 0) {
+      err = errhr(HRESULT_FROM_WIN32(GetLastError()));
+      goto cleanup;
+    }
+    if (r < n) {
+      OV_ARRAY_SET_LENGTH(*module_path, r);
+      break;
+    }
+  }
+cleanup:
+  return err;
+}
+
 static wchar_t *find_last_path_sep(wchar_t *const path) {
   wchar_t *sep = wcsrchr(path, L'\\');
   if (!sep) {
