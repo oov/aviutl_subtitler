@@ -5,7 +5,6 @@
 #include <ovarray.h>
 #include <ovnum.h>
 #include <ovprintf.h>
-#include <ovthreads.h>
 #include <ovutil/win32.h>
 
 #include "i18n.h"
@@ -186,39 +185,25 @@ cleanup:
 
 struct json2exo_context {
   void *userdata;
-  void (*on_progress)(void *const userdata, int const progress);
-  void (*on_log_line)(void *const userdata, wchar_t const *const message);
-  void (*on_finish)(void *const userdata, struct json2exo_info const *const info, error err);
-  thrd_t thread;
-  FILE_INFO fi;
-  atomic_bool abort_requested;
+  struct json2exo_params const *params;
   struct luactx *luactx;
   int module_index;
-  HANDLE json;
-  wchar_t *exo_path;
 };
 
 static NODISCARD error on_progress(void *const userdata, int const progress) {
   struct json2exo_context *const ctx = userdata;
-  error err = eok();
-  if (atomic_load(&ctx->abort_requested)) {
-    err = errg(err_abort);
-    goto cleanup;
+  if (!ctx->params->on_progress) {
+    return eok();
   }
-  if (ctx->on_progress) {
-    ctx->on_progress(ctx->userdata, progress);
+  if (!ctx->params->on_progress(ctx->userdata, progress)) {
+    return errg(err_abort);
   }
-cleanup:
-  return err;
+  return eok();
 }
 
 static NODISCARD error on_segment(void *const userdata, struct segment const *const segment) {
   struct json2exo_context *const ctx = userdata;
   error err = eok();
-  if (atomic_load(&ctx->abort_requested)) {
-    err = errg(err_abort);
-    goto cleanup;
-  }
   lua_State *L = luactx_get(ctx->luactx);
   lua_getfield(L, ctx->module_index, "on_segment");
   if (!lua_isfunction(L, -1)) {
@@ -376,46 +361,97 @@ static NODISCARD error find_max_time(void *const userdata, struct segment const 
   return eok();
 }
 
-static int worker(void *const userdata) {
-  struct json2exo_context *ctx = userdata;
-
+NODISCARD error json2exo(struct json2exo_params const *const params, struct json2exo_info *const info) {
+  if (!params || !params->json_path || !params->lua_directory || !params->module || !params->fp || !params->editp ||
+      !info) {
+    return errg(err_invalid_arugment);
+  }
   error err = eok();
+  FILE_INFO fi;
   char *buf = NULL;
   wchar_t *wbuf = NULL;
-  HANDLE h = INVALID_HANDLE_VALUE;
-  int num_objects = 0, lmin = INT_MAX, lmax = INT_MIN, fmax = INT_MIN;
+  HANDLE json = INVALID_HANDLE_VALUE;
+  HANDLE exo = INVALID_HANDLE_VALUE;
 
-  double max_time = 0;
-  err = parse(ctx->json, find_max_time, NULL, &max_time);
+  if (params->on_log_line) {
+    wchar_t msg[1024];
+    mo_snprintf_wchar(msg, sizeof(msg) / sizeof(msg[0]), L"%1$ls", "Source: %1$ls", params->json_path);
+    params->on_log_line(params->userdata, msg);
+    mo_snprintf_wchar(msg, sizeof(msg) / sizeof(msg[0]), L"%1$ls", "Destination: %1$ls", params->exo_path);
+    params->on_log_line(params->userdata, msg);
+  }
+
+  struct json2exo_context ctx = {
+      .userdata = params->userdata,
+      .params = params,
+  };
+
+  if (!params->fp->exfunc->get_file_info(params->editp, &fi)) {
+    err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to retrieve file information."));
+    goto cleanup;
+  }
+  err = luactx_create(&ctx.luactx,
+                      &(struct luactx_params){
+                          .lua_directory = params->lua_directory,
+                          .userdata = params->userdata,
+                          .on_log_line = params->on_log_line,
+                      });
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
-  if (SetFilePointer(ctx->json, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
+
+  lua_State *L = luactx_get(ctx.luactx);
+  err = lua_require(L, params->module);
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+  ctx.module_index = lua_gettop(L);
+
+  json =
+      CreateFileW(params->json_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (json == INVALID_HANDLE_VALUE) {
+    HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+    if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) {
+      err = emsg_i18nf(
+          err_type_generic, err_not_found, L"%1$ls", gettext("The file \"%1$ls\" is not found."), params->json_path);
+    } else {
+      err = errhr(hr);
+    }
+    goto cleanup;
+  }
+
+  double max_time = 0;
+  err = parse(json, find_max_time, NULL, &max_time);
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+  if (SetFilePointer(json, 0, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
 
-  lua_State *L = luactx_get(ctx->luactx);
-  lua_getfield(L, ctx->module_index, "on_start");
+  lua_getfield(L, ctx.module_index, "on_start");
   if (!lua_isfunction(L, -1)) {
     err = emsg_i18nf(err_type_generic, err_fail, L"%1$hs", gettext("\"%1$hs\" is not a function."), "on_start");
     goto cleanup;
   }
   lua_newtable(L);
-  lua_pushinteger(L, ctx->fi.w);
+  lua_pushinteger(L, fi.w);
   lua_setfield(L, -2, "width");
-  lua_pushinteger(L, ctx->fi.h);
+  lua_pushinteger(L, fi.h);
   lua_setfield(L, -2, "height");
-  lua_pushinteger(L, ctx->fi.video_rate);
+  lua_pushinteger(L, fi.video_rate);
   lua_setfield(L, -2, "rate");
-  lua_pushinteger(L, ctx->fi.video_scale);
+  lua_pushinteger(L, fi.video_scale);
   lua_setfield(L, -2, "scale");
-  lua_pushinteger(L, (int)(max_time * ctx->fi.video_rate / ctx->fi.video_scale));
+  lua_pushinteger(L, (int)(max_time * fi.video_rate / fi.video_scale));
   lua_setfield(L, -2, "length");
-  lua_pushinteger(L, ctx->fi.audio_rate);
+  lua_pushinteger(L, fi.audio_rate);
   lua_setfield(L, -2, "audio_rate");
-  lua_pushinteger(L, ctx->fi.audio_ch);
+  lua_pushinteger(L, fi.audio_ch);
   lua_setfield(L, -2, "audio_ch");
   err = lua_safecall(L, 1, 1);
   if (efailed(err)) {
@@ -428,13 +464,13 @@ static int worker(void *const userdata) {
   }
   lua_pop(L, 1);
 
-  err = parse(ctx->json, on_segment, on_progress, ctx);
+  err = parse(json, on_segment, on_progress, &ctx);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
 
-  lua_getfield(L, ctx->module_index, "on_finalize");
+  lua_getfield(L, ctx.module_index, "on_finalize");
   if (!lua_isfunction(L, -1)) {
     err = emsg_i18nf(err_type_generic, err_fail, L"%1$hs", gettext("\"%1$hs\" is not a function."), "on_finalize");
     goto cleanup;
@@ -451,6 +487,7 @@ static int worker(void *const userdata) {
     goto cleanup;
   }
 
+  int num_objects = 0, lmin = INT_MAX, lmax = INT_MIN, fmax = INT_MIN;
   if (!find_used_layer_range(exo_utf8, &num_objects, &lmin, &lmax, &fmax)) {
     err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to parse the *.exo."));
     goto cleanup;
@@ -460,8 +497,8 @@ static int worker(void *const userdata) {
     goto cleanup;
   }
 
-  h = CreateFileW(ctx->exo_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (h == INVALID_HANDLE_VALUE) {
+  exo = CreateFileW(params->exo_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (exo == INVALID_HANDLE_VALUE) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
@@ -501,7 +538,7 @@ static int worker(void *const userdata) {
   }
 
   DWORD written = 0;
-  if (!WriteFile(h, buf, (DWORD)sjislen, &written, NULL)) {
+  if (!WriteFile(exo, buf, (DWORD)sjislen, &written, NULL)) {
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
@@ -509,12 +546,19 @@ static int worker(void *const userdata) {
     err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to write the entire file."));
     goto cleanup;
   }
+  *info = (struct json2exo_info){
+      .frames = fmax,
+      .layer_min = lmin,
+      .layer_max = lmax,
+      .num_objects = num_objects,
+  };
+
 cleanup:
-  if (h != INVALID_HANDLE_VALUE) {
-    CloseHandle(h);
-    h = INVALID_HANDLE_VALUE;
+  if (exo != INVALID_HANDLE_VALUE) {
+    CloseHandle(exo);
+    exo = INVALID_HANDLE_VALUE;
     if (efailed(err)) {
-      DeleteFileW(ctx->exo_path);
+      DeleteFileW(params->exo_path);
     }
   }
   if (wbuf) {
@@ -523,144 +567,12 @@ cleanup:
   if (buf) {
     OV_ARRAY_DESTROY(&buf);
   }
-  if (ctx->json) {
-    CloseHandle(ctx->json);
-    ctx->json = INVALID_HANDLE_VALUE;
+  if (json != INVALID_HANDLE_VALUE) {
+    CloseHandle(json);
+    json = INVALID_HANDLE_VALUE;
   }
-  if (ctx->on_finish) {
-    ctx->on_finish(ctx->userdata, efailed(err) ? NULL : &(struct json2exo_info){
-      .exo_path = ctx->exo_path,
-      .length = fmax,
-      .layer_min = lmin,
-      .layer_max = lmax,
-      .num_objects = num_objects,
-    }, err);
-  }
-  return 0;
-}
-
-NODISCARD error json2exo_create(struct json2exo_context **const ctxpp, struct json2exo_params *params) {
-  if (!ctxpp || *ctxpp || !params || !params->json_path || !params->lua_directory || !params->module || !params->fp ||
-      !params->editp) {
-    return errg(err_invalid_arugment);
-  }
-
-  struct json2exo_context *ctx = NULL;
-  error err = mem(&ctx, 1, sizeof(struct json2exo_context));
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  *ctx = (struct json2exo_context){
-      .userdata = params->userdata,
-      .on_progress = params->on_progress,
-      .on_log_line = params->on_log_line,
-      .on_finish = params->on_finish,
-  };
-  atomic_init(&ctx->abort_requested, false);
-
-  {
-    FILTER *const fp = params->fp;
-    void *const editp = params->editp;
-    if (!fp->exfunc->get_file_info(editp, &ctx->fi)) {
-      err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to retrieve file information."));
-      goto cleanup;
-    }
-  }
-
-  err = luactx_create(&ctx->luactx,
-                      &(struct luactx_params){
-                          .lua_directory = params->lua_directory,
-                          .userdata = params->userdata,
-                          .on_log_line = params->on_log_line,
-                      });
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-
-  lua_State *L = luactx_get(ctx->luactx);
-  err = lua_require(L, params->module);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  ctx->module_index = lua_gettop(L);
-
-  ctx->json =
-      CreateFileW(params->json_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (ctx->json == INVALID_HANDLE_VALUE) {
-    HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-    if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) {
-      err = emsg_i18nf(
-          err_type_generic, err_not_found, L"%1$ls", gettext("The file \"%1$ls\" is not found."), params->json_path);
-    } else {
-      err = errhr(hr);
-    }
-    goto cleanup;
-  }
-
-  size_t len = wcslen(params->exo_path);
-  err = OV_ARRAY_GROW(&ctx->exo_path, len + 1);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  OV_ARRAY_SET_LENGTH(ctx->exo_path, len);
-  wcscpy(ctx->exo_path, params->exo_path);
-
-  if (ctx->on_log_line) {
-    wchar_t buf[1024];
-    mo_snprintf_wchar(buf,
-                      sizeof(buf) / sizeof(buf[0]),
-                      L"%1$ls",
-                      gettext("Generating *.exo file with module \"%1$ls\"..."),
-                      params->module);
-    ctx->on_log_line(ctx->userdata, buf);
-    ctx->on_log_line(ctx->userdata, ctx->exo_path);
-  }
-
-  if (thrd_create(&ctx->thread, worker, ctx) != thrd_success) {
-    return errhr(HRESULT_FROM_WIN32(GetLastError()));
-  }
-  *ctxpp = ctx;
-  ctx = NULL;
-cleanup:
-  if (ctx) {
-    if (ctx->exo_path) {
-      OV_ARRAY_DESTROY(&ctx->exo_path);
-    }
-    if (ctx->json != INVALID_HANDLE_VALUE) {
-      CloseHandle(ctx->json);
-      ctx->json = INVALID_HANDLE_VALUE;
-    }
-    if (ctx->luactx) {
-      luactx_destroy(&ctx->luactx);
-    }
-    ereport(mem_free(&ctx));
+  if (ctx.luactx) {
+    luactx_destroy(&ctx.luactx);
   }
   return err;
-}
-
-void json2exo_destroy(struct json2exo_context **const ctxpp) {
-  if (!ctxpp || !*ctxpp) {
-    return;
-  }
-  struct json2exo_context *const ctx = *ctxpp;
-  thrd_join(ctx->thread, NULL);
-  if (ctx->exo_path) {
-    OV_ARRAY_DESTROY(&ctx->exo_path);
-  }
-  if (ctx->luactx) {
-    luactx_destroy(&ctx->luactx);
-  }
-  ereport(mem_free(ctxpp));
-}
-
-NODISCARD error json2exo_abort(struct json2exo_context *const ctx) {
-  if (!ctx) {
-    return errg(err_invalid_arugment);
-  }
-  atomic_store(&ctx->abort_requested, true);
-  return eok();
 }

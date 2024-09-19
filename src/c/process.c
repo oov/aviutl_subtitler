@@ -158,14 +158,26 @@ cleanup:
   }
 }
 
+#if 0
+static void log_thread_id(wchar_t const *const msg) {
+  wchar_t buf[128];
+  ov_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), NULL, L"[%04X] %ls", (int)(GetCurrentThreadId()), msg);
+  OutputDebugStringW(buf);
+}
+#else
+#  define log_thread_id(msg) ((void)0)
+#endif
+
 static int read_stdout_worker(void *userdata) {
   struct process *const pr = userdata;
+  log_thread_id(L"read_stdout_worker");
   read_worker(pr->out_r, pr->on_receive_stdout, pr->on_close_stdout, pr->userdata);
   return 0;
 }
 
 static int read_stderr_worker(void *userdata) {
   struct process *const pr = userdata;
+  log_thread_id(L"read_stderr_worker");
   read_worker(pr->err_r, pr->on_receive_stderr, pr->on_close_stderr, pr->userdata);
   return 0;
 }

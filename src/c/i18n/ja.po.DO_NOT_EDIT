@@ -68,6 +68,9 @@ msgstr "高度"
 msgid "Advanced Editing"
 msgstr "拡張編集"
 
+msgid "All operations completed successfully."
+msgstr "すべての処理が完了しました。"
+
 msgid "An error occurred in Lua script."
 msgstr "Luaスクリプトでエラーが発生しました。"
 
@@ -155,11 +158,11 @@ msgstr "実装されていません。"
 msgid "Not sufficient buffer."
 msgstr "バッファが小さすぎます。"
 
-msgid "Operation completed successfully."
-msgstr "完了しました。"
-
 msgid "Operation failed."
 msgstr "失敗しました。"
+
+msgid "Operation halted. Not all steps finished."
+msgstr "エラーが発生したため処理を中断しました。"
 
 msgid "Out of memory."
 msgstr "メモリーが確保できません。"

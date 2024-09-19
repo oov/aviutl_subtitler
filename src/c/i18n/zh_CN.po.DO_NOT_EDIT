@@ -67,6 +67,9 @@ msgstr "高级"
 msgid "Advanced Editing"
 msgstr "扩展编辑"
 
+msgid "All operations completed successfully."
+msgstr "所有操作均已成功完成。"
+
 msgid "An error occurred in Lua script."
 msgstr "Lua 脚本中发生错误。"
 
@@ -154,11 +157,11 @@ msgstr "尚未实现。"
 msgid "Not sufficient buffer."
 msgstr "缓冲区不足。"
 
-msgid "Operation completed successfully."
-msgstr "操作成功完成。"
-
 msgid "Operation failed."
 msgstr "操作失败。"
+
+msgid "Operation halted. Not all steps finished."
+msgstr "操作已停止。并非所有步骤都已完成。"
 
 msgid "Out of memory."
 msgstr "内存不足。"

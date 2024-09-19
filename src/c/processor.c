@@ -1,6 +1,7 @@
 #include "processor.h"
 
 #include <ovarray.h>
+#include <ovthreads.h>
 
 #include "config.h"
 #include "i18n.h"
@@ -10,17 +11,14 @@
 #include "path.h"
 #include "raw2opus.h"
 
-struct processor_context {
+struct processor {
   struct config *config;
-  struct raw2opus_context *raw2opus;
-  struct opus2json_context *opus2json;
-  struct json2exo_context *json2exo;
   struct processor_params params;
+  thrd_t thread;
+  enum processor_type type;
+  int progress;
+  bool aborted;
 };
-
-static NODISCARD error run_raw2opus(struct processor_context *const p, bool const solo);
-static NODISCARD error run_opus2json(struct processor_context *const p, bool const solo);
-static NODISCARD error run_json2exo(struct processor_context *const p, bool const solo);
 
 static NODISCARD error get_json_path(wchar_t **const json_path, HINSTANCE const hinst) {
   error err = path_get_module_name(json_path, hinst);
@@ -116,18 +114,18 @@ cleanup:
   return err;
 }
 
-NODISCARD error processor_create(struct processor_context **const pp, struct processor_params const *const params) {
+NODISCARD error processor_create(struct processor **const pp, struct processor_params const *const params) {
   if (!pp || *pp || !params) {
     return errg(err_invalid_arugment);
   }
-  struct processor_context *p = NULL;
+  struct processor *p = NULL;
   wchar_t *json_path = NULL;
-  error err = mem(&p, 1, sizeof(struct processor_context));
+  error err = mem(&p, 1, sizeof(struct processor));
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
-  *p = (struct processor_context){
+  *p = (struct processor){
       .params = *params,
   };
   err = config_create(&p->config);
@@ -161,11 +159,11 @@ cleanup:
   return err;
 }
 
-void processor_destroy(struct processor_context **const pp) {
+void processor_destroy(struct processor **const pp) {
   if (!pp || !*pp) {
     return;
   }
-  struct processor_context *p = *pp;
+  struct processor *p = *pp;
   wchar_t *json_path = NULL;
   error err = get_json_path(&json_path, p->params.hinst);
   if (efailed(err)) {
@@ -178,15 +176,6 @@ void processor_destroy(struct processor_context **const pp) {
     goto cleanup;
   }
 cleanup:
-  if (p->raw2opus) {
-    raw2opus_destroy(&p->raw2opus);
-  }
-  if (p->opus2json) {
-    opus2json_destroy(&p->opus2json);
-  }
-  if (p->json2exo) {
-    json2exo_destroy(&p->json2exo);
-  }
   if (p->config) {
     config_destroy(&p->config);
   }
@@ -202,50 +191,35 @@ cleanup:
   ereport(err);
 }
 
-struct config *processor_get_config(struct processor_context *const p) {
+struct config *processor_get_config(struct processor *const p) {
   if (!p) {
     return NULL;
   }
   return p->config;
 }
 
-static void raw2opus_on_progress(void *const userdata, int const progress) {
-  struct processor_context *const p = userdata;
-  p->params.on_progress(p->params.userdata, progress);
-}
-static void raw2opus_on_log_line(void *const userdata, wchar_t const *const message) {
-  struct processor_context *const p = userdata;
-  p->params.on_log_line(p->params.userdata, message);
-}
-static void raw2opus_on_finish(void *const userdata, struct raw2opus_info const *const info, error err) {
-  (void)info;
-  struct processor_context *const p = userdata;
-  p->params.on_finish(p->params.userdata, err);
-}
-static void raw2opus_on_next(void *const userdata, struct raw2opus_info const *const info, error err) {
-  (void)info;
-  struct processor_context *const p = userdata;
-  if (efailed(err)) {
-    err = ethru(err);
-    ereport(remove_temporary_files(p->params.hinst));
-    p->params.on_finish(p->params.userdata, err);
-    return;
+static bool on_progress(void *const userdata, int const progress) {
+  struct processor *const p = userdata;
+  if (p->params.on_progress && !p->aborted && p->progress != progress) {
+    p->progress = progress;
+    p->params.on_progress(p->params.userdata, p->type, progress);
   }
-  p->params.on_next_task(p->params.userdata, processor_type_opus2json);
-  err = run_opus2json(p, false);
-  if (efailed(err)) {
-    err = ethru(err);
-    ereport(remove_temporary_files(p->params.hinst));
-    p->params.on_finish(p->params.userdata, err);
-  }
+  return !p->aborted;
 }
 
-static NODISCARD error run_raw2opus(struct processor_context *const p, bool const solo) {
-  if (!p) {
-    return errg(err_invalid_arugment);
-  }
+static void on_log_line(void *const userdata, wchar_t const *const message) {
+  struct processor const *const p = userdata;
+  p->params.on_log_line(p->params.userdata, p->type, message);
+}
+
+static bool run_raw2opus(struct processor *const p, bool const solo) {
   wchar_t *opus_path = NULL;
-  error err = config_verify_whisper_path(p->config);
+  error err = eok();
+  if (!p) {
+    err = errg(err_invalid_arugment);
+    goto cleanup;
+  }
+  err = config_verify_whisper_path(p->config);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -255,36 +229,31 @@ static NODISCARD error run_raw2opus(struct processor_context *const p, bool cons
     err = ethru(err);
     goto cleanup;
   }
-  err = raw2opus_create(&p->raw2opus,
-                        &(struct raw2opus_params){
-                            .fp = p->params.fp,
-                            .editp = p->params.editp,
-                            .opus_path = opus_path,
-                            .userdata = p,
-                            .on_progress = raw2opus_on_progress,
-                            .on_log_line = raw2opus_on_log_line,
-                            .on_finish = solo ? raw2opus_on_finish : raw2opus_on_next,
-                        });
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
+  p->type = processor_type_raw2opus;
+  p->progress = 0;
+  if (p->params.on_start) {
+    p->params.on_start(p->params.userdata, p->type);
   }
+  struct raw2opus_info info;
+  err = raw2opus(
+      &(struct raw2opus_params){
+          .fp = p->params.fp,
+          .editp = p->params.editp,
+          .opus_path = opus_path,
+          .userdata = p,
+          .on_progress = on_progress,
+          .on_log_line = on_log_line,
+      },
+      &info);
 cleanup:
   OV_ARRAY_DESTROY(&opus_path);
-  return err;
-}
-
-NODISCARD error processor_run_raw2opus(struct processor_context *const p) {
-  if (!p) {
-    return errg(err_invalid_arugment);
+  bool const r = esucceeded(err);
+  if (p->params.on_finish) {
+    p->params.on_finish(p->params.userdata, p->type, err);
+  } else {
+    ereport(err);
   }
-  error err = run_raw2opus(p, true);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-cleanup:
-  return err;
+  return r;
 }
 
 static NODISCARD error escape(wchar_t const *const value, wchar_t **const buf) {
@@ -339,44 +308,17 @@ cleanup:
   return err;
 }
 
-static void opus2json_on_progress(void *const userdata, int const progress) {
-  struct processor_context *const p = userdata;
-  p->params.on_progress(p->params.userdata, progress);
-}
-static void opus2json_on_log_line(void *const userdata, wchar_t const *const message) {
-  struct processor_context *const p = userdata;
-  p->params.on_log_line(p->params.userdata, message);
-}
-static void opus2json_on_finish(void *const userdata, error err) {
-  struct processor_context *const p = userdata;
-  p->params.on_finish(p->params.userdata, err);
-}
-static void opus2json_on_next(void *const userdata, error err) {
-  struct processor_context *const p = userdata;
-  if (efailed(err)) {
-    err = ethru(err);
-    ereport(remove_temporary_files(p->params.hinst));
-    p->params.on_finish(p->params.userdata, err);
-    return;
-  }
-  p->params.on_next_task(p->params.userdata, processor_type_json2exo);
-  err = run_json2exo(p, false);
-  if (efailed(err)) {
-    err = ethru(err);
-    ereport(remove_temporary_files(p->params.hinst));
-    p->params.on_finish(p->params.userdata, err);
-  }
-}
-
-static NODISCARD error run_opus2json(struct processor_context *const p, bool const solo) {
-  if (!p) {
-    return errg(err_invalid_arugment);
-  }
+static bool run_opus2json(struct processor *const p, bool const solo) {
   wchar_t const *const whisper_path = config_get_whisper_path(p->config);
   wchar_t *opus_path = NULL;
   wchar_t *args = NULL;
   wchar_t *buf = NULL;
-  error err = config_verify_whisper_path(p->config);
+  error err = eok();
+  if (!p) {
+    err = errg(err_invalid_arugment);
+    goto cleanup;
+  }
+  err = config_verify_whisper_path(p->config);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -404,79 +346,43 @@ static NODISCARD error run_opus2json(struct processor_context *const p, bool con
   APPEND_CONFIG_ARG(config_get_additional_args, L"%s ", false)
 #undef APPEND_CONFIG_ARG
 
-  err = opus2json_create(&p->opus2json,
-                         &(struct opus2json_params){
-                             .opus_path = opus_path,
-                             .whisper_path = whisper_path,
-                             .additional_args = args,
-                             .userdata = p,
-                             .on_progress = opus2json_on_progress,
-                             .on_log_line = opus2json_on_log_line,
-                             .on_finish = solo ? opus2json_on_finish : opus2json_on_next,
-                         });
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
+  p->type = processor_type_opus2json;
+  p->progress = 0;
+  if (p->params.on_start) {
+    p->params.on_start(p->params.userdata, p->type);
   }
+
+  err = opus2json(&(struct opus2json_params){
+      .opus_path = opus_path,
+      .whisper_path = whisper_path,
+      .additional_args = args,
+      .userdata = p,
+      .on_progress = on_progress,
+      .on_log_line = on_log_line,
+  });
 cleanup:
   OV_ARRAY_DESTROY(&buf);
   OV_ARRAY_DESTROY(&args);
   OV_ARRAY_DESTROY(&opus_path);
-  return err;
+  bool const r = esucceeded(err);
+  if (p->params.on_finish) {
+    p->params.on_finish(p->params.userdata, p->type, err);
+  } else {
+    ereport(err);
+  }
+  return r;
 }
 
-NODISCARD error processor_run_opus2json(struct processor_context *const p) {
-  if (!p) {
-    return errg(err_invalid_arugment);
-  }
-  error err = run_opus2json(p, true);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-cleanup:
-  return err;
-}
-
-static void json2exo_on_progress(void *const userdata, int const progress) {
-  struct processor_context *const p = userdata;
-  p->params.on_progress(p->params.userdata, progress);
-}
-static void json2exo_on_log_line(void *const userdata, wchar_t const *const message) {
-  struct processor_context *const p = userdata;
-  p->params.on_log_line(p->params.userdata, message);
-}
-static void
-json2exo_on_finish_core(void *const userdata, struct json2exo_info const *const info, error err, bool const solo) {
-  struct processor_context *const p = userdata;
-  if (info && p->params.on_create_exo) {
-    p->params.on_create_exo(p->params.userdata,
-                            &(struct processor_exo_info){
-                                .exo_path = info->exo_path,
-                                .length = info->length,
-                                .layer_min = info->layer_min,
-                                .layer_max = info->layer_max,
-                            });
-  }
-  if (!solo) {
-    ereport(remove_temporary_files(p->params.hinst));
-  }
-  p->params.on_finish(p->params.userdata, err);
-}
-static void json2exo_on_finish(void *const userdata, struct json2exo_info const *const info, error err) {
-  json2exo_on_finish_core(userdata, info, err, true);
-}
-static void json2exo_on_next(void *const userdata, struct json2exo_info const *const info, error err) {
-  json2exo_on_finish_core(userdata, info, err, false);
-}
-static NODISCARD error run_json2exo(struct processor_context *const p, bool const solo) {
-  if (!p) {
-    return errg(err_invalid_arugment);
-  }
+static bool run_json2exo(struct processor *const p, bool const solo) {
   wchar_t *json_path = NULL;
   wchar_t *exo_path = NULL;
   wchar_t *lua_directory = NULL;
-  error err = get_target_file_path(&json_path, p->params.hinst, solo, L".json");
+  error err = eok();
+  if (!p) {
+    err = errg(err_invalid_arugment);
+    goto cleanup;
+  }
+  err = get_target_file_path(&json_path, p->params.hinst, solo, L".json");
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
@@ -496,96 +402,131 @@ static NODISCARD error run_json2exo(struct processor_context *const p, bool cons
     err = emsg_i18n(err_type_generic, err_fail, gettext("The module is not set."));
     goto cleanup;
   }
-  err = json2exo_create(&p->json2exo,
-                        &(struct json2exo_params){
-                            .fp = p->params.fp,
-                            .editp = p->params.editp,
-                            .json_path = json_path,
-                            .exo_path = exo_path,
-                            .lua_directory = lua_directory,
-                            .module = module,
-                            .userdata = p,
-                            .on_progress = json2exo_on_progress,
-                            .on_log_line = json2exo_on_log_line,
-                            .on_finish = solo ? json2exo_on_finish : json2exo_on_next,
-                        });
+
+  p->type = processor_type_json2exo;
+  p->progress = 0;
+  if (p->params.on_start) {
+    p->params.on_start(p->params.userdata, p->type);
+  }
+
+  struct json2exo_info info;
+  err = json2exo(
+      &(struct json2exo_params){
+          .fp = p->params.fp,
+          .editp = p->params.editp,
+          .json_path = json_path,
+          .exo_path = exo_path,
+          .lua_directory = lua_directory,
+          .module = module,
+          .userdata = p,
+          .on_progress = on_progress,
+          .on_log_line = on_log_line,
+      },
+      &info);
+  if (p->params.on_create_exo) {
+    p->params.on_create_exo(p->params.userdata,
+                            &(struct processor_exo_info){
+                                .exo_path = exo_path,
+                                .length = info.frames,
+                                .layer_min = info.layer_min,
+                                .layer_max = info.layer_max,
+                            });
+  }
 cleanup:
   OV_ARRAY_DESTROY(&lua_directory);
   OV_ARRAY_DESTROY(&exo_path);
   OV_ARRAY_DESTROY(&json_path);
-  return err;
+  bool const r = esucceeded(err);
+  if (p->params.on_finish) {
+    p->params.on_finish(p->params.userdata, p->type, err);
+  } else {
+    ereport(err);
+  }
+  return r;
 }
 
-NODISCARD error processor_run_json2exo(struct processor_context *const p) {
+static int run(void *userdata) {
+  struct processor *const p = userdata;
+  bool r;
+  p->aborted = false;
+  r = run_raw2opus(p, false);
+  if (!r || p->aborted) {
+    goto cleanup;
+  }
+  r = run_opus2json(p, false);
+  if (!r || p->aborted) {
+    goto cleanup;
+  }
+  r = run_json2exo(p, false);
+  if (!r || p->aborted) {
+    goto cleanup;
+  }
+cleanup:
+  if (p->params.on_complete) {
+    p->params.on_complete(p->params.userdata, r && !p->aborted);
+  }
+  ereport(remove_temporary_files(p->params.hinst));
+  return 0;
+}
+
+NODISCARD error processor_run(struct processor *const p) {
   if (!p) {
     return errg(err_invalid_arugment);
   }
-  error err = run_json2exo(p, true);
-  if (efailed(err)) {
-    err = ethru(err);
+  error err = eok();
+  if (thrd_create(&p->thread, run, p) != thrd_success) {
+    err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to create thread."));
     goto cleanup;
   }
 cleanup:
   return err;
 }
 
-NODISCARD error processor_run(struct processor_context *const p) {
+static int run_solo(void *userdata) {
+  struct processor *const p = userdata;
+  bool r = false;
+  p->aborted = false;
+  p->progress = 0;
+  switch ((int)p->type) {
+  case processor_type_raw2opus:
+    r = run_raw2opus(p, true);
+    break;
+  case processor_type_opus2json:
+    r = run_opus2json(p, true);
+    break;
+  case processor_type_json2exo:
+    r = run_json2exo(p, true);
+    break;
+  }
+  if (p->params.on_complete) {
+    p->params.on_complete(p->params.userdata, r && !p->aborted);
+  }
+  return 0;
+}
+
+NODISCARD error processor_run_solo(struct processor *const p, enum processor_type const type) {
   if (!p) {
     return errg(err_invalid_arugment);
   }
   error err = eok();
-  err = run_raw2opus(p, false);
-  if (efailed(err)) {
-    err = ethru(err);
+  p->type = type;
+  if (thrd_create(&p->thread, run_solo, p) != thrd_success) {
+    err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to create thread."));
     goto cleanup;
   }
 cleanup:
+  if (efailed(err)) {
+    p->type = processor_type_invalid;
+  }
   return err;
 }
 
-NODISCARD error processor_abort(struct processor_context *const p) {
+NODISCARD error processor_abort(struct processor *const p) {
   if (!p) {
     return errg(err_invalid_arugment);
   }
-  error err = eok();
-  if (p->raw2opus) {
-    err = raw2opus_abort(p->raw2opus);
-    if (efailed(err)) {
-      err = ethru(err);
-      goto cleanup;
-    }
-  }
-  if (p->opus2json) {
-    err = opus2json_abort(p->opus2json);
-    if (efailed(err)) {
-      err = ethru(err);
-      goto cleanup;
-    }
-  }
-  if (p->json2exo) {
-    err = json2exo_abort(p->json2exo);
-    if (efailed(err)) {
-      err = ethru(err);
-      goto cleanup;
-    }
-  }
-cleanup:
-  return err;
-}
-
-void processor_clean(struct processor_context *const p) {
-  if (!p) {
-    return;
-  }
-  if (p->raw2opus) {
-    raw2opus_destroy(&p->raw2opus);
-  }
-  if (p->opus2json) {
-    opus2json_destroy(&p->opus2json);
-  }
-  if (p->json2exo) {
-    json2exo_destroy(&p->json2exo);
-  }
+  p->aborted = true;
+  return eok();
 }
 
 static NODISCARD error test_module(lua_State *const L,
@@ -659,7 +600,7 @@ cleanup:
   return err;
 }
 
-static void report_error(struct processor_context *const p, error e) {
+static void report_error(struct processor *const p, error e) {
   wchar_t *r = e->msg.ptr, *l = r;
   while (*r) {
     if (*r != L'\r' && *r != L'\n') {
@@ -669,16 +610,16 @@ static void report_error(struct processor_context *const p, error e) {
     wchar_t *sep = r;
     r += (r[0] == L'\r' && r[1] == L'\n') ? 2 : 1;
     *sep = L'\0';
-    p->params.on_log_line(p->params.userdata, l);
+    p->params.on_log_line(p->params.userdata, p->type, l);
     l = r;
   }
   if (l < r) {
-    p->params.on_log_line(p->params.userdata, l);
+    p->params.on_log_line(p->params.userdata, p->type, l);
   }
   efree(&e);
 }
 
-NODISCARD error processor_get_modules(struct processor_context *const p, struct processor_module **const pmpp) {
+NODISCARD error processor_get_modules(struct processor *const p, struct processor_module **const pmpp) {
   if (!p || !pmpp) {
     return errg(err_invalid_arugment);
   }
@@ -705,8 +646,8 @@ NODISCARD error processor_get_modules(struct processor_context *const p, struct 
   err = luactx_create(&ctx,
                       &(struct luactx_params){
                           .lua_directory = dir,
-                          .userdata = p->params.userdata,
-                          .on_log_line = p->params.on_log_line,
+                          .userdata = p,
+                          .on_log_line = on_log_line,
                       });
   if (efailed(err)) {
     err = ethru(err);
@@ -750,7 +691,7 @@ NODISCARD error processor_get_modules(struct processor_context *const p, struct 
         wchar_t msg[2048];
         mo_snprintf_wchar(
             msg, 2048, L"%1$ls", gettext("[WARN] Package \"%1$ls\" cannot be used as a module."), find_data.cFileName);
-        p->params.on_log_line(p->params.userdata, msg);
+        p->params.on_log_line(p->params.userdata, p->type, msg);
         report_error(p, err);
         continue;
       }

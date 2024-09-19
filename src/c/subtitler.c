@@ -30,12 +30,13 @@ enum {
   id_tab = 100,
   id_tmr_progress = 101,
 
-  WM_PROCESS_LOG_LINE = WM_USER + 0x1000,
-  WM_PROCESS_FINISHED = WM_USER + 0x1001,
-  WM_PROCESS_NEXT_TASK = WM_USER + 0x1002,
-  WM_PROCESS_PROGRESS = WM_USER + 0x1003,
-  WM_PROCESS_CREATE_EXO = WM_USER + 0x1004,
-  WM_PROCESS_UPDATED = WM_USER + 0x1005,
+  WM_PROCESS_START = WM_USER + 0x1000,
+  WM_PROCESS_PROGRESS = WM_USER + 0x1001,
+  WM_PROCESS_LOG_LINE = WM_USER + 0x1002,
+  WM_PROCESS_CREATE_EXO = WM_USER + 0x1003,
+  WM_PROCESS_FINISHED = WM_USER + 0x1004,
+  WM_PROCESS_COMPLETE = WM_USER + 0x1005,
+  WM_PROCESS_UPDATED = WM_USER + 0x1006,
 };
 
 enum gui_state {
@@ -44,6 +45,7 @@ enum gui_state {
   gui_state_ready,
   gui_state_invalid_exe_path,
   gui_state_running,
+  gui_state_aborting,
 };
 
 static wchar_t const models[] = L"tiny,tiny.en,base,base.en,small,small.en,medium,medium.en,large-v1,large-v2,large-v3,"
@@ -116,7 +118,7 @@ static struct progress {
   bool solo;
 } g_progress_info = {0};
 
-static struct processor_context *g_processor = NULL;
+static struct processor *g_processor = NULL;
 static struct processor_module *g_modules = NULL;
 static HWND *g_disabled_windows = NULL;
 
@@ -369,13 +371,13 @@ static void add_log(wchar_t const *const message) {
   SendMessageW(g_logview, LB_SETCURSEL, (WPARAM)(count - 1), 0);
 }
 
-static void on_next_task(void *const userdata, enum processor_type const type) {
-  (void)userdata;
-  PostMessageW(aviutl_get_my_window(), WM_PROCESS_NEXT_TASK, 0, (LPARAM)type);
+static void on_start(void *const userdata, enum processor_type const type) {
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_START, (WPARAM)userdata, (LPARAM)type);
 }
 
-static void on_progress(void *const userdata, int const progress) {
+static void on_progress(void *const userdata, enum processor_type const type, int const progress) {
   (void)userdata;
+  (void)type;
   ULONGLONG const now = GetTickCount64();
   mtx_lock(&g_mtx);
   g_progress_info.prev_updated_at = g_progress_info.last_updated_at;
@@ -403,12 +405,12 @@ static void on_create_exo(void *const userdata, struct processor_exo_info const 
   mtx_unlock(&g_mtx);
 }
 
-static void on_finish(void *const userdata, error e) {
-  PostMessageW(aviutl_get_my_window(), WM_PROCESS_FINISHED, (WPARAM)userdata, (LPARAM)e);
-}
-
-static void on_log_line(void *const userdata, wchar_t const *const message) {
+static void on_log_line(void *const userdata, enum processor_type const type, wchar_t const *const message) {
+  (void)type;
   if (g_gui_thread_id == GetCurrentThreadId()) {
+    // When creating a list of Lua modules, this callback function is called from the calling thread.
+    // In that case, it is not possible to wait for the completion of PostMessage with cnd_wait,
+    // so process it with SendMessage.
     SendMessageW(aviutl_get_my_window(), WM_PROCESS_LOG_LINE, (WPARAM)userdata, (LPARAM)message);
     return;
   }
@@ -419,6 +421,15 @@ static void on_log_line(void *const userdata, wchar_t const *const message) {
     cnd_wait(&g_cnd, &g_mtx);
   }
   mtx_unlock(&g_mtx);
+}
+
+static void on_finish(void *const userdata, enum processor_type const type, error e) {
+  (void)type;
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_FINISHED, (WPARAM)userdata, (LPARAM)e);
+}
+
+static void on_complete(void *const userdata, bool const success) {
+  PostMessageW(aviutl_get_my_window(), WM_PROCESS_COMPLETE, (WPARAM)userdata, (LPARAM)success);
 }
 
 static void
@@ -500,37 +511,38 @@ cleanup:
 static void finish(void *const userdata, error e) {
   (void)userdata;
   wchar_t buf[1024];
-  error err = eok();
-  processor_clean(g_processor);
-  update_state(gui_state_ready);
-  if (g_disabled_windows) {
-    restore_disabled_family_windows(g_disabled_windows);
-    g_disabled_windows = NULL;
-  }
-  if (esucceeded(e)) {
-    mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("Operation completed successfully."));
-    add_log(buf);
-    goto cleanup;
-  }
   if (eisg(e, err_abort)) {
     efree(&e);
     mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("Aborted."));
     add_log(buf);
-    goto cleanup;
+  } else if (efailed(e)) {
+    mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("Operation failed."));
+    add_log(buf);
+    error_to_log(e);
   }
-  mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("Operation failed."));
+}
+
+static void complete(void *const userdata, bool const success) {
+  (void)userdata;
+  wchar_t buf[1024];
+  if (success) {
+    mo_snprintf_wchar(buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("All operations completed successfully."));
+  } else {
+    mo_snprintf_wchar(
+        buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", gettext("Operation halted. Not all steps finished."));
+  }
   add_log(buf);
-  error_to_log(e);
-cleanup:
-  if (efailed(err)) {
-    ereport(err);
-  }
   mtx_lock(&g_mtx);
   g_progress_info = (struct progress){
       .type = processor_type_invalid,
   };
   mtx_unlock(&g_mtx);
+  update_state(gui_state_ready);
   update_title();
+  if (g_disabled_windows) {
+    restore_disabled_family_windows(g_disabled_windows);
+    g_disabled_windows = NULL;
+  }
   KillTimer(aviutl_get_my_window(), id_tmr_progress);
 }
 
@@ -558,27 +570,19 @@ static void run(enum processor_type const type) {
                       gettext("[WARN] Do not touch other windows while processing."));
     add_log(buf);
   }
-  NODISCARD error (*fn)(struct processor_context *const) = NULL;
-  switch (type) {
+  update_state(gui_state_running);
+  switch ((int)type) {
   case processor_type_invalid:
-    fn = processor_run;
+    err = processor_run(g_processor);
     break;
-  case processor_type_raw2opus:
-    fn = processor_run_raw2opus;
-    break;
-  case processor_type_opus2json:
-    fn = processor_run_opus2json;
-    break;
-  case processor_type_json2exo:
-    fn = processor_run_json2exo;
+  default:
+    err = processor_run_solo(g_processor, type);
     break;
   }
-  err = fn(g_processor);
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
-  update_state(gui_state_running);
   mtx_lock(&g_mtx);
   ULONGLONG const now = GetTickCount64();
   g_progress_info = (struct progress){
@@ -597,6 +601,7 @@ cleanup:
       restore_disabled_family_windows(g_disabled_windows);
       g_disabled_windows = NULL;
     }
+    update_state(gui_state_ready);
     finish(NULL, err);
   }
 }
@@ -614,6 +619,7 @@ static void push_start_or_abort(void) {
       err = ethru(err);
       goto cleanup;
     }
+    update_state(gui_state_aborting);
   }
 cleanup:
   if (efailed(err)) {
@@ -785,11 +791,11 @@ static void update_state(enum gui_state s) {
     s = gui_state_invalid_exe_path;
   }
   EnableWindow(g_tab, TRUE);
-  EnableWindow(g_pane_main, s == gui_state_ready || s == gui_state_running);
+  EnableWindow(g_pane_main, s == gui_state_ready || s == gui_state_running || s == gui_state_aborting);
   EnableWindow(g_pane_settings,
                s == gui_state_ready || s == gui_state_no_project || s == gui_state_invalid_exe_path ||
-                   s == gui_state_running);
-  EnableWindow(g_pane_advanced, s == gui_state_ready || s == gui_state_running);
+                   s == gui_state_running || s == gui_state_aborting);
+  EnableWindow(g_pane_advanced, s == gui_state_ready || s == gui_state_running || s == gui_state_aborting);
 
   EnableWindow(g_lbl_model, s == gui_state_ready);
   EnableWindow(g_cmb_model, s == gui_state_ready);
@@ -822,12 +828,14 @@ static void update_state(enum gui_state s) {
   EnableWindow(g_btn_opus2json, s == gui_state_ready);
   EnableWindow(g_btn_json2exo, s == gui_state_ready);
 
-  EnableWindow(g_progress, s == gui_state_ready || s == gui_state_running);
+  EnableWindow(g_progress, s == gui_state_ready || s == gui_state_running || s == gui_state_aborting);
   EnableWindow(g_logview, TRUE);
 
   wchar_t buf[1024];
-  mo_snprintf_wchar(
-      buf, sizeof(buf) / sizeof(wchar_t), L"%1$ls", s == gui_state_running ? gettext("Abort") : gettext("Start"));
+  mo_snprintf_wchar(buf,
+                    sizeof(buf) / sizeof(wchar_t),
+                    L"%1$ls",
+                    s == gui_state_running || s == gui_state_aborting ? gettext("Abort") : gettext("Start"));
   SetWindowTextW(g_btn_start, buf);
 }
 
@@ -1251,11 +1259,12 @@ static bool filter_init(HWND const window, void *const editp, FILTER *const fp) 
                              .editp = editp,
                              .fp = fp,
                              .userdata = NULL,
-                             .on_next_task = on_next_task,
+                             .on_start = on_start,
                              .on_progress = on_progress,
                              .on_log_line = on_log_line,
                              .on_create_exo = on_create_exo,
                              .on_finish = on_finish,
+                             .on_complete = on_complete,
                          });
   if (efailed(err)) {
     err = ethru(err);
@@ -1370,17 +1379,7 @@ static BOOL filter_wndproc(HWND const window,
     pmmi->ptMinTrackSize.x = 600;
     pmmi->ptMinTrackSize.y = 360;
   } break;
-  case WM_PROCESS_LOG_LINE:
-    add_log((wchar_t *)lparam);
-    mtx_lock(&g_mtx);
-    g_log_processed = true;
-    cnd_signal(&g_cnd);
-    mtx_unlock(&g_mtx);
-    break;
-  case WM_PROCESS_FINISHED:
-    finish((void *)wparam, (error)lparam);
-    break;
-  case WM_PROCESS_NEXT_TASK:
+  case WM_PROCESS_START:
     mtx_lock(&g_mtx);
     ULONGLONG const now = GetTickCount64();
     g_progress_info = (struct progress){
@@ -1391,9 +1390,41 @@ static BOOL filter_wndproc(HWND const window,
     };
     mtx_unlock(&g_mtx);
     update_title();
+    {
+      wchar_t buf[1024];
+      switch (lparam) {
+      case processor_type_raw2opus:
+        mo_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$hs", gettext("Encoding audio to Opus..."));
+        add_log(buf);
+        break;
+      case processor_type_opus2json:
+        mo_snprintf_wchar(buf,
+                          sizeof(buf) / sizeof(wchar_t),
+                          L"%1$hs",
+                          gettext("Generating *json from *.opus using %1$hs..."),
+                          gettext("Whisper"));
+        add_log(buf);
+        break;
+      case processor_type_json2exo:
+        mo_snprintf_wchar(buf,
+                          sizeof(buf) / sizeof(buf[0]),
+                          L"%1$ls",
+                          gettext("Generating *.exo file with module \"%1$ls\"..."),
+                          config_get_module(processor_get_config(g_processor)));
+        add_log(buf);
+        break;
+      }
+    }
     break;
   case WM_PROCESS_PROGRESS:
     update_title();
+    break;
+  case WM_PROCESS_LOG_LINE:
+    add_log((wchar_t *)lparam);
+    mtx_lock(&g_mtx);
+    g_log_processed = true;
+    cnd_signal(&g_cnd);
+    mtx_unlock(&g_mtx);
     break;
   case WM_PROCESS_CREATE_EXO: {
     create_exo((void *)wparam, (struct processor_exo_info *)lparam, fp, editp);
@@ -1402,6 +1433,12 @@ static BOOL filter_wndproc(HWND const window,
     cnd_signal(&g_cnd);
     mtx_unlock(&g_mtx);
   } break;
+  case WM_PROCESS_FINISHED:
+    finish((void *)wparam, (error)lparam);
+    break;
+  case WM_PROCESS_COMPLETE:
+    complete((void *)wparam, (bool)lparam);
+    break;
   case WM_PROCESS_UPDATED:
     return TRUE;
   default:

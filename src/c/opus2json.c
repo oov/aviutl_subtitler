@@ -25,18 +25,39 @@
 #include "path.h"
 #include "process.h"
 
+enum send_state {
+  send_state_ready,
+  send_state_on_progress,
+  send_state_on_log_line,
+  send_state_on_close,
+};
+
+enum processed_state {
+  processed_state_ready,
+  processed_state_processed,
+};
+
 struct opus2json_context {
   struct process_line_buffer_context out_buffer;
   struct process_line_buffer_context err_buffer;
   struct opus2json_params params;
+  mtx_t mtx;
+  // Mutex to protect against simultaneous execution of event requests
+  mtx_t mtx_req;
+  cnd_t cnd;
+
+  enum send_state send_state;
+  enum processed_state processed_state;
+  int progress;
+  wchar_t *buffer;
+
   int64_t samples;
   int sample_rate;
   int channels;
   bool abort_requested;
-  mtx_t mtx;
+  int closed;
   struct process *pr;
   wchar_t *json_path;
-  wchar_t *buffer;
 };
 
 static int opus_read(void *_stream, unsigned char *_ptr, int _nbytes) {
@@ -216,6 +237,40 @@ static int64_t parse_time_code(char const *const time_code) {
   return -1;
 }
 
+#if 0
+// Debugging stuff for mutex and condition variable
+static void lock_log(char const *const msg, int const line, char const *const func) {
+  wchar_t buf[256];
+  ov_snprintf_wchar(
+      buf, sizeof(buf) / sizeof(wchar_t), NULL, L"[%zu] %hs:%d %hs", GetCurrentThreadId(), func, line, msg);
+  OutputDebugStringW(buf);
+}
+
+#  define mtx_lock(mtx)                                                                                                \
+    do {                                                                                                               \
+      lock_log("Locking", __LINE__, __func__);                                                                         \
+      (mtx_lock)(mtx);                                                                                                 \
+      lock_log("Locked", __LINE__, __func__);                                                                          \
+    } while (0)
+#  define mtx_unlock(mtx)                                                                                              \
+    do {                                                                                                               \
+      lock_log("Unlocking", __LINE__, __func__);                                                                       \
+      (mtx_unlock)(mtx);                                                                                               \
+      lock_log("Unlocked", __LINE__, __func__);                                                                        \
+    } while (0)
+#  define cnd_signal(cnd)                                                                                              \
+    do {                                                                                                               \
+      (cnd_signal)(cnd);                                                                                               \
+      lock_log("Signaled", __LINE__, __func__);                                                                        \
+    } while (0)
+#  define cnd_wait(cnd, mtx)                                                                                           \
+    do {                                                                                                               \
+      lock_log("Waiting", __LINE__, __func__);                                                                         \
+      (cnd_wait)(cnd, mtx);                                                                                            \
+      lock_log("Wakeup", __LINE__, __func__);                                                                          \
+    } while (0)
+#endif
+
 static void process_line(void *const userdata, char const *const message) {
   struct opus2json_context *const ctx = userdata;
   if (ctx->params.on_progress) {
@@ -226,7 +281,17 @@ static void process_line(void *const userdata, char const *const message) {
       int64_t e = parse_time_code(arrow + 5);
       if (s != -1 && s != -1 && s <= e) {
         int64_t const total = ctx->samples * 1000 / ctx->sample_rate;
-        ctx->params.on_progress(ctx->params.userdata, (int)((e * 10000) / total));
+        mtx_lock(&ctx->mtx_req);
+        mtx_lock(&ctx->mtx);
+        ctx->progress = (int)((e * 10000) / total);
+        ctx->send_state = send_state_on_progress;
+        cnd_signal(&ctx->cnd);
+        while (ctx->processed_state == processed_state_ready) {
+          cnd_wait(&ctx->cnd, &ctx->mtx);
+        }
+        ctx->processed_state = processed_state_ready;
+        mtx_unlock(&ctx->mtx);
+        mtx_unlock(&ctx->mtx_req);
       }
     } else if (strstr(message, "audio seconds/s") != NULL && message[3] == '%') {
       // Read a line like " 87% | 20/23 | 00:06<<00:00 |  3.11 audio seconds/s" and report progress
@@ -236,7 +301,17 @@ static void process_line(void *const userdata, char const *const message) {
       }
       int64_t progress = 0;
       if (ov_atoi(p, &progress, false)) {
-        ctx->params.on_progress(ctx->params.userdata, (int)(progress * 100));
+        mtx_lock(&ctx->mtx_req);
+        mtx_lock(&ctx->mtx);
+        ctx->progress = (int)(progress * 100);
+        ctx->send_state = send_state_on_progress;
+        cnd_signal(&ctx->cnd);
+        while (ctx->processed_state == processed_state_ready) {
+          cnd_wait(&ctx->cnd, &ctx->mtx);
+        }
+        ctx->processed_state = processed_state_ready;
+        mtx_unlock(&ctx->mtx);
+        mtx_unlock(&ctx->mtx_req);
       }
     }
   }
@@ -258,7 +333,16 @@ static void process_line(void *const userdata, char const *const message) {
       ereport(errhr(HRESULT_FROM_WIN32(GetLastError())));
       return;
     }
-    ctx->params.on_log_line(ctx->params.userdata, ctx->buffer);
+    mtx_lock(&ctx->mtx_req);
+    mtx_lock(&ctx->mtx);
+    ctx->send_state = send_state_on_log_line;
+    cnd_signal(&ctx->cnd);
+    while (ctx->processed_state == processed_state_ready) {
+      cnd_wait(&ctx->cnd, &ctx->mtx);
+    }
+    ctx->processed_state = processed_state_ready;
+    mtx_unlock(&ctx->mtx);
+    mtx_unlock(&ctx->mtx_req);
   }
 }
 
@@ -272,51 +356,52 @@ static void process_on_receive_stderr(void *userdata, void const *const ptr, siz
   process_line_buffer(&ctx->err_buffer, ptr, len);
 }
 
-static void process_on_close_stdout(void *userdata, error err) {
+static void process_on_close(void *userdata, error err) {
   struct opus2json_context *const ctx = userdata;
-  HANDLE h = INVALID_HANDLE_VALUE;
-
   mtx_lock(&ctx->mtx);
-
-  if (efailed(err)) {
-    goto cleanup;
+  if (++ctx->closed == 2) {
+    ctx->send_state = send_state_on_close;
+    cnd_signal(&ctx->cnd);
   }
-  if (ctx->abort_requested) {
-    err = errg(err_abort);
-    goto cleanup;
-  }
-  h = CreateFileW(ctx->json_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (h == INVALID_HANDLE_VALUE) {
-    err = errhr(HRESULT_FROM_WIN32(GetLastError()));
-    goto cleanup;
-  }
-cleanup:
-  if (h != INVALID_HANDLE_VALUE) {
-    CloseHandle(h);
-    h = INVALID_HANDLE_VALUE;
-  }
-  if (efailed(err)) {
-    DeleteFileW(ctx->json_path);
-  }
-  void (*on_finish)(void *const userdata, error err) = ctx->params.on_finish;
-  void *ud = ctx->params.userdata;
   mtx_unlock(&ctx->mtx);
-  if (on_finish) {
-    on_finish(ud, err);
-  }
+  ereport(err);
 }
 
-NODISCARD error opus2json_create(struct opus2json_context **const ctxpp, struct opus2json_params const *const params) {
-  if (!ctxpp || *ctxpp || !params || !params->opus_path || !params->whisper_path) {
+static NODISCARD error call_progress(struct opus2json_context *const ctx) {
+  if (!ctx->params.on_progress) {
+    return eok();
+  }
+  if (ctx->params.on_progress(ctx->params.userdata, ctx->progress)) {
+    return eok();
+  }
+  error err = process_send_ctrl_break(ctx->pr);
+  if (efailed(err)) {
+    err = ethru(err);
+    goto cleanup;
+  }
+  ctx->abort_requested = true;
+cleanup:
+  return err;
+}
+
+NODISCARD error opus2json(struct opus2json_params const *const params) {
+  if (!params || !params->opus_path || !params->whisper_path) {
     return errg(err_invalid_arugment);
   }
 
-  struct opus2json_context *ctx = NULL;
   struct process *pr = NULL;
   wchar_t *json_path = NULL;
   wchar_t *temp_path = NULL;
   int channels;
   int64_t samples;
+
+  struct opus2json_context ctx = {
+      .params = *params,
+  };
+  mtx_init(&ctx.mtx, mtx_plain);
+  mtx_init(&ctx.mtx_req, mtx_plain);
+  cnd_init(&ctx.cnd);
+  mtx_lock(&ctx.mtx);
 
   error err = get_opus_info(params->opus_path, &samples, &channels);
   if (efailed(err)) {
@@ -340,34 +425,15 @@ NODISCARD error opus2json_create(struct opus2json_context **const ctxpp, struct 
     temp_path[temp_path_len - 1] = L'\0';
   }
 
-  err = mem(&ctx, 1, sizeof(struct opus2json_context));
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  *ctx = (struct opus2json_context){
-      .params = *params,
-  };
-  mtx_init(&ctx->mtx, mtx_plain);
-  mtx_lock(&ctx->mtx);
-
   wchar_t buf[4096];
-  mo_snprintf_wchar(buf,
+  ov_snprintf_wchar(buf,
                     sizeof(buf) / sizeof(wchar_t),
-                    L"%1$hs",
-                    gettext("Generating *json from *.opus using %1$hs..."),
-                    gettext("Whisper"));
-  if (params->on_log_line) {
-    params->on_log_line(params->userdata, buf);
-  }
-  ov_snprintf(buf,
-              sizeof(buf),
-              NULL,
-              L"\"%ls\" \"%ls\" --output_dir \"%ls\" --output_format json --word_timestamps True %ls",
-              params->whisper_path,
-              params->opus_path,
-              temp_path,
-              params->additional_args);
+                    NULL,
+                    L"\"%ls\" \"%ls\" --output_dir \"%ls\" --output_format json --word_timestamps True %ls",
+                    params->whisper_path,
+                    params->opus_path,
+                    temp_path,
+                    params->additional_args);
   if (params->on_log_line) {
     params->on_log_line(params->userdata, buf);
   }
@@ -375,31 +441,80 @@ NODISCARD error opus2json_create(struct opus2json_context **const ctxpp, struct 
   err = process_create(&pr,
                        &(struct process_options){
                            .cmdline = buf,
-                           .userdata = ctx,
+                           .userdata = &ctx,
                            .on_receive_stdout = process_on_receive_stdout,
                            .on_receive_stderr = process_on_receive_stderr,
-                           .on_close_stdout = process_on_close_stdout,
+                           .on_close_stdout = process_on_close,
+                           .on_close_stderr = process_on_close,
                        });
   if (efailed(err)) {
     err = ethru(err);
     goto cleanup;
   }
 
-  ctx->out_buffer.userdata = ctx;
-  ctx->out_buffer.on_line = process_line;
-  ctx->err_buffer.userdata = ctx;
-  ctx->err_buffer.on_line = process_line;
-  ctx->samples = samples;
-  ctx->sample_rate = 48000;
-  ctx->channels = channels;
-  ctx->pr = pr;
-  ctx->json_path = json_path;
-  pr = NULL;
-  json_path = NULL;
-  mtx_unlock(&ctx->mtx);
-  *ctxpp = ctx;
-  ctx = NULL;
+  ctx.out_buffer.userdata = &ctx;
+  ctx.out_buffer.on_line = process_line;
+  ctx.err_buffer.userdata = &ctx;
+  ctx.err_buffer.on_line = process_line;
+  ctx.samples = samples;
+  ctx.sample_rate = 48000;
+  ctx.channels = channels;
+  ctx.pr = pr;
+  ctx.json_path = json_path;
+  mtx_unlock(&ctx.mtx);
+
+  while (1) {
+    while (ctx.send_state == send_state_ready) {
+      struct timespec ts;
+      timespec_get(&ts, TIME_UTC);
+      ts.tv_sec += 1;
+      switch (cnd_timedwait(&ctx.cnd, &ctx.mtx, &ts)) {
+      case thrd_success:
+        break;
+      case thrd_timedout:
+        mtx_unlock(&ctx.mtx);
+        err = call_progress(&ctx);
+        mtx_lock(&ctx.mtx);
+        if (efailed(err)) {
+          err = ethru(err);
+          goto cleanup;
+        }
+        break;
+      default:
+        err = errg(err_fail);
+        goto cleanup;
+      }
+    }
+    switch (ctx.send_state) {
+    case send_state_ready:
+      err = errg(err_unexpected);
+      break;
+    case send_state_on_progress:
+      err = call_progress(&ctx);
+      break;
+    case send_state_on_log_line:
+      if (params->on_log_line) {
+        params->on_log_line(params->userdata, ctx.buffer);
+      }
+      break;
+    case send_state_on_close:
+      if (ctx.abort_requested) {
+        err = errg(err_abort);
+      }
+      goto cleanup;
+    }
+    ctx.send_state = send_state_ready;
+    ctx.processed_state = processed_state_processed;
+    cnd_signal(&ctx.cnd);
+    if (efailed(err)) {
+      err = ethru(err);
+      goto cleanup;
+    }
+  }
 cleanup:
+  if (esucceeded(err) && GetFileAttributesW(json_path) == INVALID_FILE_ATTRIBUTES) {
+    err = emsg_i18nf(err_type_generic, err_not_found, L"%1$ls", gettext("The file \"%1$ls\" is not found."), json_path);
+  }
   if (pr) {
     process_destroy(&pr);
   }
@@ -407,53 +522,16 @@ cleanup:
     OV_ARRAY_DESTROY(&temp_path);
   }
   if (json_path) {
+    if (efailed(err)) {
+      DeleteFileW(json_path);
+    }
     OV_ARRAY_DESTROY(&json_path);
   }
-  if (ctx) {
-    mtx_unlock(&ctx->mtx);
-    mtx_destroy(&ctx->mtx);
-    ereport(mem_free(&ctx));
+  if (ctx.buffer) {
+    OV_ARRAY_DESTROY(&ctx.buffer);
   }
-  return err;
-}
-
-void opus2json_destroy(struct opus2json_context **const ctxpp) {
-  if (!ctxpp || !*ctxpp) {
-    return;
-  }
-  struct opus2json_context *ctx = *ctxpp;
-  mtx_lock(&ctx->mtx);
-  struct process *pr = ctx->pr;
-  mtx_unlock(&ctx->mtx);
-  if (pr) {
-    process_destroy(&pr);
-    pr = NULL;
-  }
-  mtx_lock(&ctx->mtx);
-  ctx->pr = NULL;
-  if (ctx->json_path) {
-    OV_ARRAY_DESTROY(&ctx->json_path);
-  }
-  if (ctx->buffer) {
-    OV_ARRAY_DESTROY(&ctx->buffer);
-  }
-  mtx_destroy(&ctx->mtx);
-  ereport(mem_free(ctxpp));
-}
-
-NODISCARD error opus2json_abort(struct opus2json_context *const ctx) {
-  error err = eok();
-  mtx_lock(&ctx->mtx);
-  if (!ctx->pr) {
-    goto cleanup;
-  }
-  err = process_send_ctrl_break(ctx->pr);
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  ctx->abort_requested = true;
-cleanup:
-  mtx_unlock(&ctx->mtx);
+  cnd_destroy(&ctx.cnd);
+  mtx_destroy(&ctx.mtx_req);
+  mtx_destroy(&ctx.mtx);
   return err;
 }

@@ -225,6 +225,10 @@ add_executable(test_export_audio export_audio_test.c export_audio.c)
 target_link_libraries(test_export_audio PRIVATE subtitler_intf)
 add_test(NAME test_export_audio COMMAND test_export_audio)
 
+add_executable(test_raw2opus raw2opus_test.c export_audio.c path.c)
+target_link_libraries(test_raw2opus PRIVATE subtitler_intf)
+add_test(NAME test_raw2opus COMMAND test_raw2opus)
+
 add_executable(test_opus2json opus2json_test.c path.c process.c)
 target_link_libraries(test_opus2json PRIVATE subtitler_intf)
 add_test(NAME test_opus2json COMMAND test_opus2json)

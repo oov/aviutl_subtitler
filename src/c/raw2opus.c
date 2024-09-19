@@ -1,10 +1,7 @@
 #include "raw2opus.h"
 
-#include <stdatomic.h>
-
 #include <ovarray.h>
 #include <ovprintf.h>
-#include <ovthreads.h>
 #include <ovutil/win32.h>
 
 #ifdef __GNUC__
@@ -25,14 +22,58 @@
 #include "export_audio.h"
 #include "i18n.h"
 
+static size_t bytes_to_human_readable(char *const buf8, uint64_t const bytes, char const decimal_point) {
+  size_t suffix = 0;
+  int d, f;
+  {
+    uint64_t d64 = bytes, prev = 0;
+    while (d64 >= 1000) {
+      prev = d64;
+      d64 /= 1024;
+      suffix++;
+    }
+    d = (int)(d64);
+    f = (int)(suffix ? prev - d64 * 1024 : prev);
+  }
+  size_t i = 0;
+  if (!suffix) {
+    if (d >= 100) {
+      buf8[i++] = (char)(d / 100) + '0';
+    }
+    if (d >= 10) {
+      buf8[i++] = (char)(d / 10 % 10) + '0';
+    }
+    buf8[i++] = (char)(d % 10) + '0';
+  } else if (d >= 100) {
+    d += (f + 512) / 1024;
+    if (d >= 100) {
+      buf8[i++] = (char)(d / 100) + '0';
+      d %= 100;
+    }
+    buf8[i++] = (char)(d / 10) + '0';
+    buf8[i++] = (char)(d % 10) + '0';
+  } else if (d >= 10) {
+    f = (f * 10 + 512) / 1024;
+    buf8[i++] = (char)(d / 10) + '0';
+    buf8[i++] = (char)(d % 10) + '0';
+    buf8[i++] = decimal_point;
+    buf8[i++] = (char)(f) + '0';
+  } else {
+    f = (f * 100 + 512) / 1024;
+    buf8[i++] = (char)(d) + '0';
+    buf8[i++] = decimal_point;
+    buf8[i++] = (char)(f / 10) + '0';
+    buf8[i++] = (char)(f % 10) + '0';
+  }
+  buf8[i] = '\0';
+  return suffix;
+}
+
 struct raw2opus_context {
-  struct raw2opus_params params;
-  struct raw2opus_info info;
-  OggOpusEnc *enc;
-  OggOpusComments *comments;
-  mtx_t mtx;
+  struct raw2opus_params const *const params;
+  size_t samples;
   HANDLE dest;
-  struct export_audio *ea;
+  OggOpusEnc *enc;
   error err;
 };
 
@@ -60,39 +101,17 @@ cleanup:
       err = eok();
     }
   }
-  if (efailed(ctx->err)) {
-    export_audio_abort(ctx->ea);
-  }
-  return efailed(ctx->err) ? -1 : 0;
+  return efailed(ctx->err) ? 1 : 0;
 }
 
 static int opus_close(void *userdata) {
-  struct raw2opus_context *const ctx = userdata;
-  error err = eok();
-  if (ctx->err) {
-    goto cleanup;
-  }
-  if (!CloseHandle(ctx->dest)) {
-    err = errhr(HRESULT_FROM_WIN32(GetLastError()));
-    goto cleanup;
-  }
-  ctx->dest = INVALID_HANDLE_VALUE;
-cleanup:
-  if (efailed(err)) {
-    if (efailed(ctx->err)) {
-      efree(&err);
-    } else {
-      ctx->err = err;
-      err = eok();
-    }
-  }
-  return efailed(ctx->err) ? -1 : 0;
+  (void)userdata;
+  return 0;
 }
 
-static void export_audio_read(void *const userdata, void *const p, size_t const samples, int const progress) {
+static bool export_audio_read(void *const userdata, void *const p, size_t const samples, int const progress) {
   struct raw2opus_context *const ctx = userdata;
   error err = eok();
-  mtx_lock(&ctx->mtx);
   if (ctx->err) {
     goto cleanup;
   }
@@ -101,9 +120,12 @@ static void export_audio_read(void *const userdata, void *const p, size_t const 
     err = emsg_i18nf(err_type_generic, err_fail, L"%1$hs", gettext("Unable to write file: %1$hs"), ope_strerror(r));
     goto cleanup;
   }
-  ctx->info.samples += samples;
-  if (ctx->params.on_progress) {
-    ctx->params.on_progress(ctx->params.userdata, progress);
+  ctx->samples += samples;
+  if (ctx->params->on_progress) {
+    if (!ctx->params->on_progress(ctx->params->userdata, progress)) {
+      err = errg(err_abort);
+      goto cleanup;
+    }
   }
 cleanup:
   if (efailed(err)) {
@@ -114,76 +136,29 @@ cleanup:
       err = eok();
     }
   }
-  if (efailed(ctx->err)) {
-    export_audio_abort(ctx->ea);
-  }
-  mtx_unlock(&ctx->mtx);
+  return esucceeded(ctx->err);
 }
 
-static void export_audio_finish(void *const userdata, error err) {
-  struct raw2opus_context *ctx = userdata;
-  if (efailed(err)) {
-    goto cleanup;
-  }
-  mtx_lock(&ctx->mtx);
-  int r = ope_encoder_drain(ctx->enc);
-  if (r < 0) {
-    err = emsg_i18nf(err_type_generic, err_fail, L"%1$hs", gettext("Unable to drain: %1$hs"), ope_strerror(r));
-    goto cleanup;
-  }
-cleanup:
-  if (ctx->dest != INVALID_HANDLE_VALUE) {
-    CloseHandle(ctx->dest);
-    ctx->dest = INVALID_HANDLE_VALUE;
-    if (efailed(err)) {
-      DeleteFileW(ctx->params.opus_path);
-    }
-  }
-  if (efailed(err)) {
-    if (efailed(ctx->err)) {
-      efree(&err);
-    } else {
-      ctx->err = err;
-      err = eok();
-    }
-  }
-  void (*on_finish)(void *const userdata, struct raw2opus_info const *const info, error err) = ctx->params.on_finish;
-  void *ud = ctx->params.userdata;
-  struct raw2opus_info const info = ctx->info;
-  error e = ctx->err;
-  mtx_unlock(&ctx->mtx);
-  if (on_finish) {
-    on_finish(ud, &info, e);
-  }
-}
-
-NODISCARD error raw2opus_create(struct raw2opus_context **const ctxpp, struct raw2opus_params const *const params) {
-  if (!ctxpp || *ctxpp || !params || !params->fp || !params->editp || !params->opus_path) {
+NODISCARD error raw2opus(struct raw2opus_params const *const params, struct raw2opus_info *const info) {
+  if (!params || !params->fp || !params->editp || !params->opus_path || !info) {
     return errg(err_invalid_arugment);
   }
-
-  struct raw2opus_context *ctx = NULL;
   FILTER *fp = params->fp;
   FILE_INFO fi = {0};
   HANDLE dest = INVALID_HANDLE_VALUE;
   OggOpusEnc *enc = NULL;
   OggOpusComments *comments = NULL;
-  struct export_audio *ea = NULL;
+  error err = eok();
 
-  error err = mem(&ctx, 1, sizeof(struct raw2opus_context));
-  if (efailed(err)) {
-    err = ethru(err);
-    goto cleanup;
-  }
-  *ctx = (struct raw2opus_context){
-      .err = eok(),
-      .params = *params,
-  };
-  mtx_init(&ctx->mtx, mtx_plain);
-  mtx_lock(&ctx->mtx);
   if (!fp->exfunc->get_file_info(params->editp, &fi)) {
     err = emsg_i18n(err_type_generic, err_fail, gettext("Unable to retrieve file information."));
     goto cleanup;
+  }
+
+  if (params->on_log_line) {
+    wchar_t msg[1024];
+    mo_snprintf_wchar(msg, sizeof(msg) / sizeof(msg[0]), L"%1$ls", "Destination: %1$ls", params->opus_path);
+    params->on_log_line(params->userdata, msg);
   }
 
   dest = CreateFileW(params->opus_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -191,6 +166,12 @@ NODISCARD error raw2opus_create(struct raw2opus_context **const ctxpp, struct ra
     err = errhr(HRESULT_FROM_WIN32(GetLastError()));
     goto cleanup;
   }
+
+  struct raw2opus_context ctx = {
+      .params = params,
+      .dest = dest,
+      .err = eok(),
+  };
 
   comments = ope_comments_create();
   if (!comments) {
@@ -203,7 +184,7 @@ NODISCARD error raw2opus_create(struct raw2opus_context **const ctxpp, struct ra
           .write = opus_write,
           .close = opus_close,
       },
-      ctx,
+      &ctx,
       comments,
       fi.audio_rate,
       fi.audio_ch,
@@ -215,51 +196,59 @@ NODISCARD error raw2opus_create(struct raw2opus_context **const ctxpp, struct ra
     goto cleanup;
   }
 
-  err = export_audio_create(&ea,
-                            &(struct export_audio_options){
-                                .editp = params->editp,
-                                .fp = params->fp,
-                                .userdata = ctx,
-                                .on_read = export_audio_read,
-                                .on_finish = export_audio_finish,
-                            });
+  ctx.enc = enc;
+  err = export_audio(&(struct export_audio_params){
+      .editp = params->editp,
+      .fp = params->fp,
+      .userdata = &ctx,
+      .on_read = export_audio_read,
+  });
   if (efailed(err)) {
+    if (efailed(ctx.err)) {
+      efree(&err);
+      err = ctx.err;
+      ctx.err = eok();
+    }
     err = ethru(err);
     goto cleanup;
   }
-  ctx->info = (struct raw2opus_info){
-      .sample_rate = fi.audio_rate,
-      .channels = fi.audio_ch,
-      .samples = 0,
-  };
-  ctx->enc = enc;
-  ctx->comments = comments;
-  ctx->dest = dest;
-  ctx->ea = ea;
-  dest = INVALID_HANDLE_VALUE;
-  ea = NULL;
-  enc = NULL;
-  comments = NULL;
-  if (ctx->params.on_log_line) {
-    wchar_t buf[1024];
-    mo_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$hs", gettext("Encoding audio to Opus..."));
-    ctx->params.on_log_line(ctx->params.userdata, buf);
-    mo_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$ls", "%1$ls", params->opus_path);
-    ctx->params.on_log_line(ctx->params.userdata, buf);
+
+  er = ope_encoder_drain(enc);
+  if (er < 0) {
+    err = emsg_i18nf(err_type_generic, err_fail, L"%1$hs", gettext("Unable to drain: %1$hs"), ope_strerror(er));
+    goto cleanup;
   }
-  mtx_unlock(&ctx->mtx);
-  *ctxpp = ctx;
-  ctx = NULL;
+
+  if (params->on_log_line) {
+    LARGE_INTEGER size;
+    char b[8];
+    wchar_t msg[1024];
+    if (!GetFileSizeEx(dest, &size)) {
+      err = errhr(HRESULT_FROM_WIN32(GetLastError()));
+      goto cleanup;
+    }
+    static char const *suffixes[] = {
+        "byte(s)",
+        "KB",
+        "MB",
+        "GB",
+        "TB",
+        "PB",
+        "EB",
+    };
+    size_t const suffix = bytes_to_human_readable(b, (uint64_t)size.QuadPart, '.');
+    mo_snprintf_wchar(msg, sizeof(msg) / sizeof(msg[0]), L"%1$hs%2$hs", "File size: %1$hs %2$hs", b, suffixes[suffix]);
+    params->on_log_line(params->userdata, msg);
+  }
+
+  if (info) {
+    *info = (struct raw2opus_info){
+        .sample_rate = fi.audio_rate,
+        .channels = fi.audio_ch,
+        .samples = ctx.samples,
+    };
+  }
 cleanup:
-  if (ctx) {
-    mtx_unlock(&ctx->mtx);
-    mtx_destroy(&ctx->mtx);
-    ereport(mem_free(&ctx));
-  }
-  if (ea) {
-    export_audio_abort(ea);
-    export_audio_destroy(&ea);
-  }
   if (enc) {
     ope_encoder_destroy(enc);
     enc = NULL;
@@ -271,34 +260,9 @@ cleanup:
   if (dest != INVALID_HANDLE_VALUE) {
     CloseHandle(dest);
     dest = INVALID_HANDLE_VALUE;
-    DeleteFileW(params->opus_path);
+    if (efailed(err)) {
+      DeleteFileW(params->opus_path);
+    }
   }
   return err;
-}
-
-void raw2opus_destroy(struct raw2opus_context **const ctxpp) {
-  if (!ctxpp || !*ctxpp) {
-    return;
-  }
-  struct raw2opus_context *ctx = *ctxpp;
-  if (ctx->enc) {
-    ope_encoder_destroy(ctx->enc);
-    ctx->enc = NULL;
-  }
-  if (ctx->comments) {
-    ope_comments_destroy(ctx->comments);
-    ctx->comments = NULL;
-  }
-  if (ctx->ea) {
-    export_audio_destroy(&ctx->ea);
-  }
-  mtx_destroy(&ctx->mtx);
-  ereport(mem_free(ctxpp));
-}
-
-NODISCARD error raw2opus_abort(struct raw2opus_context *const ctx) {
-  if (ctx->ea) {
-    export_audio_abort(ctx->ea);
-  }
-  return eok();
 }

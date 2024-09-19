@@ -3,8 +3,6 @@
 #include "aviutl.h"
 #include "export_audio.h"
 
-#include <ovthreads.h>
-
 struct mock_edit {
   int start_frame;
   int end_frame;
@@ -82,44 +80,38 @@ static FILTER mock_fp = {
 };
 
 static void test_export_audio_invalid_params(void) {
-  struct export_audio *ea = NULL;
-  struct export_audio_options options = {
+  struct export_audio_params options = {
       .editp = NULL,
       .fp = &mock_fp,
   };
-  error err = export_audio_create(&ea, &options);
+  error err = export_audio(&options);
   TEST_EISG_F(err, err_invalid_arugment);
-  TEST_CHECK(ea == NULL);
 }
 
 struct ctx {
   FILE_INFO fi;
   int frames;
   int processed;
-  bool finished;
   bool aborted;
-  mtx_t mtx;
-  cnd_t cnd;
 };
 
-static void on_read(void *const userdata, void *const p, size_t const samples, int const progress) {
+static bool on_read(void *const userdata, void *const p, size_t const samples, int const progress) {
   struct ctx *ctx = userdata;
   int16_t *buf = p;
-  mtx_lock(&ctx->mtx);
   ++ctx->processed;
-  cnd_signal(&ctx->cnd);
-  mtx_unlock(&ctx->mtx);
-  Sleep(40);
   TEST_CHECK(samples == (size_t)(ctx->fi.audio_rate * ctx->fi.video_scale / ctx->fi.video_rate));
   TEST_CHECK(buf[0] == 123 && buf[1] == -123);
   TEST_CHECK(buf[samples * (size_t)ctx->fi.audio_ch - 2] == 234 && buf[samples * (size_t)ctx->fi.audio_ch - 1] == -234);
   int const golden_progress = (ctx->processed * 10000) / ctx->frames;
   TEST_CHECK(golden_progress == progress);
   TEST_MSG("wanted: %d, got: %d", golden_progress, progress);
+  if (ctx->aborted) {
+    return false;
+  }
+  return true;
 }
 
-static void on_finish(void *const userdata, error err) {
-  struct ctx *ctx = userdata;
+static void on_finish(struct ctx *ctx, error err) {
   if (ctx->aborted) {
     TEST_EISG_F(err, err_abort);
     TEST_CHECK(ctx->processed == ctx->frames - 1);
@@ -127,10 +119,6 @@ static void on_finish(void *const userdata, error err) {
     TEST_SUCCEEDED_F(err);
     TEST_CHECK(ctx->processed == ctx->frames);
   }
-  mtx_lock(&ctx->mtx);
-  ctx->finished = true;
-  cnd_signal(&ctx->cnd);
-  mtx_unlock(&ctx->mtx);
 }
 
 static void ctx_init(struct ctx *ctx, struct mock_edit const *const e) {
@@ -138,99 +126,43 @@ static void ctx_init(struct ctx *ctx, struct mock_edit const *const e) {
       .fi = e->fi,
       .frames = e->start_frame == -1 || e->end_frame == -1 ? e->fi.frame_n : e->end_frame - e->start_frame + 1,
   };
-  mtx_init(&ctx->mtx, mtx_plain);
-  cnd_init(&ctx->cnd);
-}
-
-static void ctx_destroy(struct ctx *ctx) {
-  cnd_destroy(&ctx->cnd);
-  mtx_destroy(&ctx->mtx);
 }
 
 static void test_export_audio_all_frame(void) {
   struct ctx ctx = {0};
-  struct export_audio *ea = NULL;
   ctx_init(&ctx, &state1);
-  mtx_lock(&ctx.mtx);
-  error err = export_audio_create(&ea,
-                                  &(struct export_audio_options){
-                                      .editp = &state1,
-                                      .fp = &mock_fp,
-                                      .userdata = &ctx,
-                                      .on_read = on_read,
-                                      .on_finish = on_finish,
-                                  });
-  if (!TEST_SUCCEEDED_F(err)) {
-    goto cleanup;
-  }
-  while (!ctx.finished) {
-    cnd_wait(&ctx.cnd, &ctx.mtx);
-  }
-cleanup:
-  mtx_unlock(&ctx.mtx);
-  if (ea) {
-    export_audio_destroy(&ea);
-  }
-  ctx_destroy(&ctx);
+  error err = export_audio(&(struct export_audio_params){
+      .editp = &state1,
+      .fp = &mock_fp,
+      .userdata = &ctx,
+      .on_read = on_read,
+  });
+  on_finish(&ctx, err);
 }
 
 static void test_export_audio_range(void) {
   struct ctx ctx = {0};
-  struct export_audio *ea = NULL;
   ctx_init(&ctx, &state2);
-  mtx_lock(&ctx.mtx);
-  error err = export_audio_create(&ea,
-                                  &(struct export_audio_options){
-                                      .editp = &state2,
-                                      .fp = &mock_fp,
-                                      .userdata = &ctx,
-                                      .on_read = on_read,
-                                      .on_finish = on_finish,
-                                  });
-  if (!TEST_SUCCEEDED_F(err)) {
-    goto cleanup;
-  }
-  while (!ctx.finished) {
-    cnd_wait(&ctx.cnd, &ctx.mtx);
-  }
-cleanup:
-  mtx_unlock(&ctx.mtx);
-  if (ea) {
-    export_audio_destroy(&ea);
-  }
-  ctx_destroy(&ctx);
+  error err = export_audio(&(struct export_audio_params){
+      .editp = &state2,
+      .fp = &mock_fp,
+      .userdata = &ctx,
+      .on_read = on_read,
+  });
+  on_finish(&ctx, err);
 }
 
 static void test_export_audio_abort(void) {
   struct ctx ctx = {0};
-  struct export_audio *ea = NULL;
   ctx_init(&ctx, &state2);
-  mtx_lock(&ctx.mtx);
-  error err = export_audio_create(&ea,
-                                  &(struct export_audio_options){
-                                      .editp = &state2,
-                                      .fp = &mock_fp,
-                                      .userdata = &ctx,
-                                      .on_read = on_read,
-                                      .on_finish = on_finish,
-                                  });
-  if (!TEST_SUCCEEDED_F(err)) {
-    goto cleanup;
-  }
-  while (ctx.processed != 1) {
-    cnd_wait(&ctx.cnd, &ctx.mtx);
-  }
-  export_audio_abort(ea);
   ctx.aborted = true;
-  while (!ctx.finished) {
-    cnd_wait(&ctx.cnd, &ctx.mtx);
-  }
-cleanup:
-  mtx_unlock(&ctx.mtx);
-  if (ea) {
-    export_audio_destroy(&ea);
-  }
-  ctx_destroy(&ctx);
+  error err = export_audio(&(struct export_audio_params){
+      .editp = &state2,
+      .fp = &mock_fp,
+      .userdata = &ctx,
+      .on_read = on_read,
+  });
+  on_finish(&ctx, err);
 }
 
 TEST_LIST = {
