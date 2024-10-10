@@ -44,33 +44,20 @@ PUBLIC
 target_compile_options(opusfile PRIVATE -O2)
 target_link_libraries(opusfile PUBLIC ogg opus)
 
-set(LUA51_PLATFORM i686)
-set(LUA51_URL "https://github.com/oov/lua-5.1.5/releases/download/v5.1.5/lua_v5.1.5_${LUA51_PLATFORM}.zip")
-string(REGEX MATCH "[^/]+$" LUA51_ARCHIVE_NAME "${LUA51_URL}")
-set(LUA51_ARCHIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/${LUA51_ARCHIVE_NAME}")
-set(LUA51_DIR "${CMAKE_CURRENT_BINARY_DIR}/lua51")
-set(LUA51_DLL "${LUA51_DIR}/bin/lua51.dll")
-set(LUA51_INCLUDE "${LUA51_DIR}/include")
-if(NOT EXISTS "${LUA51_DIR}")
-  if(NOT EXISTS "${LUA51_ARCHIVE_PATH}")
-    file(DOWNLOAD "${LUA51_URL}" "${LUA51_ARCHIVE_PATH}")
-  endif()
-  string(REGEX REPLACE "\\.[^.]+$" "" LUA51_ARCHIVE_NOEXT "${LUA51_ARCHIVE_NAME}")
-  file(MAKE_DIRECTORY "${LUA51_DIR}")
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xf ${LUA51_ARCHIVE_PATH}
-    WORKING_DIRECTORY "${LUA51_DIR}"
-  )
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E copy "${LUA51_DLL}" "${CMAKE_CURRENT_BINARY_DIR}/lua51.dll"
-  )
-endif()
+include(FetchContent)
+set(LUA51_URL "https://github.com/oov/lua-5.1.5/releases/download/v5.1.5/lua_v5.1.5_i686.zip")
+FetchContent_Populate(
+  lua51
+  URL ${LUA51_URL}
+)
+set(LUA51_DLL "${lua51_SOURCE_DIR}/bin/lua51.dll")
+set(LUA51_INCLUDE "${lua51_SOURCE_DIR}/include")
 
 if(FORMAT_SOURCES)
   file(GLOB_RECURSE sources LIST_DIRECTORIES false CONFIGURE_DEPENDS "*.h" "*.c")
   list(FILTER sources EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/3rd")
   find_program(CLANG_FORMAT_EXE clang-format)
-  add_custom_target(${PROJECT_NAME}-format ALL
+  add_custom_target(${PROJECT_NAME}-format-c
     COMMAND ${CLANG_FORMAT_EXE} -style=file -i ${sources}
   )
 
@@ -92,9 +79,12 @@ if(FORMAT_SOURCES)
       WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     )
   endif()
-  add_custom_target(${PROJECT_NAME}-format-lua ALL
+  add_custom_target(${PROJECT_NAME}-format-lua
     COMMAND ${STYLUA_EXE} --config-path "${PROJECT_SOURCE_DIR}/.stylua.toml" "${CMAKE_CURRENT_SOURCE_DIR}/../lua"
   )
+  add_custom_target(${PROJECT_NAME}-format DEPENDS ${PROJECT_NAME}-format-c ${PROJECT_NAME}-format-lua)
+else()
+  add_custom_target(${PROJECT_NAME}-format) # do nothing
 endif()
 
 add_custom_target(generate_version_h COMMAND
@@ -191,6 +181,7 @@ target_link_libraries(subtitler_intf INTERFACE
   opusfile
   "${LUA51_DLL}"
 )
+add_dependencies(subtitler_intf ${PROJECT_NAME}-format)
 
 add_custom_target(copy_related_files
   COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/src/lua" "${CMAKE_BINARY_DIR}/bin/Subtitler"
