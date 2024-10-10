@@ -62,25 +62,16 @@ if(FORMAT_SOURCES)
   )
 
   if(CMAKE_HOST_WIN32)
-    set(STYLUA_URL "https://github.com/JohnnyMorganz/StyLua/releases/download/v0.20.0/stylua-windows-x86_64.zip")
-    set(STYLUA_EXE "${CMAKE_CURRENT_BINARY_DIR}/stylua.exe")
+    set(STYLUA_FILE "stylua-windows-x86_64.zip")
   else()
-    set(STYLUA_URL "https://github.com/JohnnyMorganz/StyLua/releases/download/v0.20.0/stylua-linux-x86_64-musl.zip")
-    set(STYLUA_EXE "${CMAKE_CURRENT_BINARY_DIR}/stylua")
+    set(STYLUA_FILE "stylua-linux-x86_64-musl.zip")
   endif()
-  string(REGEX MATCH "[^/]+$" STYLUA_ARCHIVE_NAME "${STYLUA_URL}")
-  set(STYLUA_ARCHIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}/${STYLUA_ARCHIVE_NAME}")
-  if(NOT EXISTS "${STYLUA_EXE}")
-    if(NOT EXISTS "${STYLUA_ARCHIVE_PATH}")
-      file(DOWNLOAD "${STYLUA_URL}" "${STYLUA_ARCHIVE_PATH}")
-    endif()
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xf ${STYLUA_ARCHIVE_PATH}
-      WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    )
-  endif()
+  FetchContent_Populate(
+    stylua
+    URL "https://github.com/JohnnyMorganz/StyLua/releases/download/v0.20.0/${STYLUA_FILE}"
+  )
   add_custom_target(${PROJECT_NAME}-format-lua
-    COMMAND ${STYLUA_EXE} --config-path "${PROJECT_SOURCE_DIR}/.stylua.toml" "${CMAKE_CURRENT_SOURCE_DIR}/../lua"
+    COMMAND "${stylua_SOURCE_DIR}/stylua" --config-path "${PROJECT_SOURCE_DIR}/.stylua.toml" "${CMAKE_CURRENT_SOURCE_DIR}/../lua"
   )
   add_custom_target(${PROJECT_NAME}-format DEPENDS ${PROJECT_NAME}-format-c ${PROJECT_NAME}-format-lua)
 else()
