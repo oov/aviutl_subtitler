@@ -61,7 +61,7 @@ ARCHDIR=${ARCHDIR:-i686}
 destdir="${PWD}/build/${CMAKE_BUILD_TYPE}/${ARCHDIR}"
 CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX:-"${destdir}/local"}
 CMAKE_C_COMPILER=${CMAKE_C_COMPILER:-i686-w64-mingw32-clang}
-CMAKE_TOOL_CHANIN_FILE=${CMAKE_TOOL_CHANIN_FILE:-}
+CMAKE_TOOL_CHANIN_FILE=${CMAKE_TOOL_CHANIN_FILE:-"src/c/3rd/ovbase/cmake/llvm-mingw.cmake"}
 
 if [ "${REBUILD}" -eq 1 ] || [ ! -e "${destdir}/CMakeCache.txt" ]; then
   rm -rf "${destdir}"
