@@ -42,9 +42,10 @@ struct opus2json_context {
   struct process_line_buffer_context err_buffer;
   struct opus2json_params params;
   mtx_t mtx;
-  // Mutex to protect against simultaneous execution of event requests
-  mtx_t mtx_req;
+  mtx_t mtx2;
+  mtx_t mtx3; // Mutex to protect against simultaneous execution of event requests
   cnd_t cnd;
+  cnd_t cnd2;
 
   enum send_state send_state;
   enum processed_state processed_state;
@@ -281,17 +282,19 @@ static void process_line(void *const userdata, char const *const message) {
       int64_t e = parse_time_code(arrow + 5);
       if (s != -1 && s != -1 && s <= e) {
         int64_t const total = ctx->samples * 1000 / ctx->sample_rate;
-        mtx_lock(&ctx->mtx_req);
+        mtx_lock(&ctx->mtx3);
         mtx_lock(&ctx->mtx);
         ctx->progress = (int)((e * 10000) / total);
         ctx->send_state = send_state_on_progress;
         cnd_signal(&ctx->cnd);
+        mtx_unlock(&ctx->mtx);
+        mtx_lock(&ctx->mtx2);
         while (ctx->processed_state == processed_state_ready) {
-          cnd_wait(&ctx->cnd, &ctx->mtx);
+          cnd_wait(&ctx->cnd2, &ctx->mtx2);
         }
         ctx->processed_state = processed_state_ready;
-        mtx_unlock(&ctx->mtx);
-        mtx_unlock(&ctx->mtx_req);
+        mtx_unlock(&ctx->mtx2);
+        mtx_unlock(&ctx->mtx3);
       }
     } else if (strstr(message, "audio seconds/s") != NULL && message[3] == '%') {
       // Read a line like " 87% | 20/23 | 00:06<<00:00 |  3.11 audio seconds/s" and report progress
@@ -301,17 +304,19 @@ static void process_line(void *const userdata, char const *const message) {
       }
       int64_t progress = 0;
       if (ov_atoi(p, &progress, false)) {
-        mtx_lock(&ctx->mtx_req);
+        mtx_lock(&ctx->mtx3);
         mtx_lock(&ctx->mtx);
         ctx->progress = (int)(progress * 100);
         ctx->send_state = send_state_on_progress;
         cnd_signal(&ctx->cnd);
+        mtx_unlock(&ctx->mtx);
+        mtx_lock(&ctx->mtx2);
         while (ctx->processed_state == processed_state_ready) {
-          cnd_wait(&ctx->cnd, &ctx->mtx);
+          cnd_wait(&ctx->cnd2, &ctx->mtx2);
         }
         ctx->processed_state = processed_state_ready;
-        mtx_unlock(&ctx->mtx);
-        mtx_unlock(&ctx->mtx_req);
+        mtx_unlock(&ctx->mtx2);
+        mtx_unlock(&ctx->mtx3);
       }
     }
   }
@@ -333,16 +338,18 @@ static void process_line(void *const userdata, char const *const message) {
       ereport(errhr(HRESULT_FROM_WIN32(GetLastError())));
       return;
     }
-    mtx_lock(&ctx->mtx_req);
+    mtx_lock(&ctx->mtx3);
     mtx_lock(&ctx->mtx);
     ctx->send_state = send_state_on_log_line;
     cnd_signal(&ctx->cnd);
+    mtx_unlock(&ctx->mtx);
+    mtx_lock(&ctx->mtx2);
     while (ctx->processed_state == processed_state_ready) {
-      cnd_wait(&ctx->cnd, &ctx->mtx);
+      cnd_wait(&ctx->cnd2, &ctx->mtx2);
     }
     ctx->processed_state = processed_state_ready;
-    mtx_unlock(&ctx->mtx);
-    mtx_unlock(&ctx->mtx_req);
+    mtx_unlock(&ctx->mtx2);
+    mtx_unlock(&ctx->mtx3);
   }
 }
 
@@ -358,12 +365,14 @@ static void process_on_receive_stderr(void *userdata, void const *const ptr, siz
 
 static void process_on_close(void *userdata, error err) {
   struct opus2json_context *const ctx = userdata;
+  mtx_lock(&ctx->mtx3);
   mtx_lock(&ctx->mtx);
   if (++ctx->closed == 2) {
     ctx->send_state = send_state_on_close;
     cnd_signal(&ctx->cnd);
   }
   mtx_unlock(&ctx->mtx);
+  mtx_unlock(&ctx->mtx3);
   ereport(err);
 }
 
@@ -399,8 +408,10 @@ NODISCARD error opus2json(struct opus2json_params const *const params) {
       .params = *params,
   };
   mtx_init(&ctx.mtx, mtx_plain);
-  mtx_init(&ctx.mtx_req, mtx_plain);
+  mtx_init(&ctx.mtx2, mtx_plain);
+  mtx_init(&ctx.mtx3, mtx_plain);
   cnd_init(&ctx.cnd);
+  cnd_init(&ctx.cnd2);
   mtx_lock(&ctx.mtx);
 
   error err = get_opus_info(params->opus_path, &samples, &channels);
@@ -461,7 +472,6 @@ NODISCARD error opus2json(struct opus2json_params const *const params) {
   ctx.channels = channels;
   ctx.pr = pr;
   ctx.json_path = json_path;
-  mtx_unlock(&ctx.mtx);
 
   while (1) {
     while (ctx.send_state == send_state_ready) {
@@ -490,7 +500,9 @@ NODISCARD error opus2json(struct opus2json_params const *const params) {
       err = errg(err_unexpected);
       break;
     case send_state_on_progress:
+      mtx_unlock(&ctx.mtx);
       err = call_progress(&ctx);
+      mtx_lock(&ctx.mtx);
       break;
     case send_state_on_log_line:
       if (params->on_log_line) {
@@ -503,9 +515,11 @@ NODISCARD error opus2json(struct opus2json_params const *const params) {
       }
       goto cleanup;
     }
+    mtx_lock(&ctx.mtx2);
     ctx.send_state = send_state_ready;
     ctx.processed_state = processed_state_processed;
-    cnd_signal(&ctx.cnd);
+    cnd_signal(&ctx.cnd2);
+    mtx_unlock(&ctx.mtx2);
     if (efailed(err)) {
       err = ethru(err);
       goto cleanup;
@@ -530,8 +544,10 @@ cleanup:
   if (ctx.buffer) {
     OV_ARRAY_DESTROY(&ctx.buffer);
   }
+  cnd_destroy(&ctx.cnd2);
   cnd_destroy(&ctx.cnd);
-  mtx_destroy(&ctx.mtx_req);
+  mtx_destroy(&ctx.mtx3);
+  mtx_destroy(&ctx.mtx2);
   mtx_destroy(&ctx.mtx);
   return err;
 }
